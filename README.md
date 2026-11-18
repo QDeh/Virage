@@ -11,6 +11,10 @@ npm run dev
 
 Ouvrir l’URL affichée par Vite, généralement http://localhost:5173.
 
+## Backend Pivot AI
+
+Le backend Spring Boot / Java 21 se trouve dans `back end`. Il relaie les requêtes vers trois webhooks n8n configurés par variables d’environnement ; consulter [`back end/README.md`](back%20end/README.md) pour le démarrage, les URLs de webhook et le contrat des endpoints. Le frontend de démonstration décrit ci-dessous reste local et ses écrans utilisent encore des données simulées ; il n’appelle pas automatiquement ce backend.
+
 ```bash
 npm run build
 npm run preview
@@ -28,7 +32,7 @@ La navigation permet de revenir aux étapes déjà ouvertes. Le contexte React c
 
 ## Données et limites
 
-Application entièrement locale, sans backend, sans appel à une IA et sans compte. Les métiers, scores, salaires, compétences, durées et formations sont des données de démonstration définies dans `src/data.ts`. Les scores sont fixes : ils ne sont pas calculés à partir des réponses. Le parcours et les compétences à développer changent selon le métier choisi.
+Le frontend de démonstration fonctionne sans compte et sans appel à une IA. Les métiers, scores, salaires, compétences, durées et formations sont des données de démonstration définies dans `src/data.ts`. Les scores sont fixes : ils ne sont pas calculés à partir des réponses. Le parcours et les compétences à développer changent selon le métier choisi.
 
 Le dépôt du CV vérifie son extension (PDF/DOCX) et sa taille (10 Mo maximum). Aucun contenu n’est lu, envoyé ou conservé : seul le nom du fichier est sauvegardé. Le catalogue de formations illustre le domaine informatique ; pour les autres métiers, un message invite à vérifier sa pertinence. Les liens externes ouvrent les sites des organismes. Les statistiques de l’accueil sont fictives et explicitement signalées.
 

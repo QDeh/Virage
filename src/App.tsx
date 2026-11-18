@@ -42,9 +42,10 @@ import {
   TrendingUp,
 } from "lucide-react";
 import { Badge, Button, Card, Progress } from "./components/ui";
-import { courses, interests, jobs, roadmap, steps, strengths } from "./data";
+import { interests, steps } from "./data";
 import { useVirage } from "./store";
 import type { Profile } from "./store";
+import { analyzeJob, analyzeProfile, matchJobs } from "./api";
 
 const interestIcons = [
   Monitor,
@@ -92,14 +93,96 @@ function Heading({
   );
 }
 export default function App() {
-  const { state, update, reset } = useVirage();
+  const { state, update, reset, cvFile } = useVirage();
   const [help, setHelp] = useState(false);
   const [restart, setRestart] = useState(false);
   const [mobile, setMobile] = useState(false);
+  const [apiError, setApiError] = useState("");
+  const [jobLoading, setJobLoading] = useState(false);
   const focusRef = useRef<HTMLElement>(null);
-  const job = jobs.find((j) => j.id === state.selected) || jobs[0];
+  const suggestion =
+    state.jobs.find((candidate) => candidate.name === state.selected) ??
+    state.jobs[0];
+  const job = suggestion
+    ? {
+        id: suggestion.name,
+        title: suggestion.name,
+        score: state.jobAnalysis?.compatibility ?? suggestion.score,
+        description: suggestion.description,
+        reason: suggestion.reason,
+        skills: state.jobAnalysis?.missingSkills ?? [],
+        existingSkills: state.jobAnalysis?.existingSkills ?? [],
+        duration: state.jobAnalysis?.estimatedDuration ?? "À estimer",
+        roadmap: state.jobAnalysis?.roadmap ?? [],
+        trainings: state.jobAnalysis?.trainings ?? [],
+      }
+    : null;
   const go = (step: number) =>
     update({ step, view: "wizard", maxStep: Math.max(state.maxStep, step) });
+  const startAnalysis = async () => {
+    if (!cvFile) {
+      setApiError("Veuillez sélectionner à nouveau votre CV avant de lancer l’analyse.");
+      return;
+    }
+    setApiError("");
+    update({ view: "loading", profileAnalysis: null, jobs: [], jobAnalysis: null });
+    try {
+      const profile = await analyzeProfile(cvFile, {
+        currentJob: state.job,
+        region: state.region,
+        hobbies: state.interests,
+        preferences: {
+          education: state.education,
+          remote: state.remote,
+          team: state.team,
+          office: state.office,
+          technical: state.technical,
+          relational: state.relational,
+          management: state.management,
+          travel: state.travel,
+          autonomy: state.autonomy,
+        },
+      });
+      const matches = await matchJobs(profile);
+      update({
+        profileAnalysis: profile,
+        jobs: matches.jobs,
+        selected: matches.jobs[0]?.name ?? "",
+        step: 3,
+        maxStep: Math.max(state.maxStep, 3),
+        view: "wizard",
+      });
+    } catch (error) {
+      setApiError(
+        error instanceof Error ? error.message : "L’analyse du profil a échoué.",
+      );
+      update({ view: "wizard" });
+    }
+  };
+  const selectJob = async (name: string) => {
+    if (!state.profileAnalysis) {
+      setApiError("Relancez l’analyse de votre profil avant de choisir un métier.");
+      return;
+    }
+    setApiError("");
+    setJobLoading(true);
+    update({ selected: name, jobAnalysis: null });
+    try {
+      const analysis = await analyzeJob(name, state.profileAnalysis);
+      update({
+        jobAnalysis: analysis,
+        step: 4,
+        maxStep: Math.max(state.maxStep, 4),
+        view: "wizard",
+      });
+    } catch (error) {
+      setApiError(
+        error instanceof Error ? error.message : "L’analyse du métier a échoué.",
+      );
+    } finally {
+      setJobLoading(false);
+    }
+  };
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "instant" });
     focusRef.current?.focus();
@@ -207,15 +290,26 @@ export default function App() {
             tabIndex={-1}
             className={`main-content ${state.view === "loading" ? "loading-main" : ""}`}
           >
+            {apiError && (
+              <p className="error" role="alert">
+                {apiError}
+              </p>
+            )}
             {state.view === "loading" ? (
-              <AnalysisLoading done={() => go(3)} />
+              <AnalysisLoading />
             ) : state.view === "dashboard" ? (
-              <Dashboard
-                state={state}
-                job={job}
-                edit={go}
-                restart={() => setRestart(true)}
-              />
+              job && state.jobAnalysis ? (
+                <Dashboard
+                  state={state}
+                  job={job}
+                  edit={go}
+                  restart={() => setRestart(true)}
+                />
+              ) : (
+                <p className="error" role="alert">
+                  Analysez un métier pour afficher votre parcours.
+                </p>
+              )
             ) : (
               <div key={state.step} className="step-content enter">
                 {state.step === 0 && <ProfileStep />}
@@ -402,7 +496,7 @@ export default function App() {
                     </div>
                     <BottomNav
                       back={() => go(1)}
-                      next={() => update({ view: "loading" })}
+                      next={startAnalysis}
                       label="Découvrir mes métiers"
                       icon={<Sparkles size={17} />}
                     />
@@ -432,15 +526,13 @@ export default function App() {
                       <h2>
                         Vos recommandations <span>5 métiers</span>
                       </h2>
-                      <span className="muted small">
-                        Triés par compatibilité
-                      </span>
+                      <span className="muted small">Triés par compatibilité</span>
                     </div>
                     <div className="jobs-grid">
-                      {jobs.map((j, i) => (
+                      {state.jobs.map((j, i) => (
                         <Card
                           className={`job-card ${i === 0 ? "best-match" : ""}`}
-                          key={j.id}
+                          key={j.name}
                           style={{ animationDelay: `${i * 65}ms` }}
                         >
                           {i === 0 && (
@@ -465,14 +557,8 @@ export default function App() {
                               <span>de compatibilité</span>
                             </span>
                           </div>
-                          <span className="category">{j.category}</span>
-                          <h2>{j.title}</h2>
+                          <h2>{j.name}</h2>
                           <p>{j.description}</p>
-                          <div className="job-tags">
-                            {j.tags.map((t) => (
-                              <Badge key={t}>{t}</Badge>
-                            ))}
-                          </div>
                           <div className="why">
                             <strong>
                               <Lightbulb size={14} /> Pourquoi ce métier ?
@@ -482,16 +568,13 @@ export default function App() {
                           <div className="job-meta">
                             <span>
                               <Clock3 size={14} />
-                              {j.duration} mois estimés
+                              Durée à estimer après analyse
                             </span>
-                            <span>{j.salary}</span>
                           </div>
                           <Button
                             variant={i === 0 ? "default" : "outline"}
-                            onClick={() => {
-                              update({ selected: j.id });
-                              go(4);
-                            }}
+                            disabled={jobLoading}
+                            onClick={() => void selectJob(j.name)}
                           >
                             Voir le parcours
                             <ArrowRight size={16} />
@@ -499,14 +582,14 @@ export default function App() {
                         </Card>
                       ))}
                     </div>
-                    <div className="demo-note">
-                      <CircleHelp size={16} /> Recommandations et scores simulés
-                      pour la démonstration. Ils ne constituent pas un bilan
-                      professionnel.
+                    <div className="info-banner">
+                      <Lightbulb size={20} />
+                      <p>{state.profileAnalysis?.profileSummary}</p>
                     </div>
                     <BottomNav
                       back={() => go(2)}
-                      next={() => go(4)}
+                      next={() => suggestion && void selectJob(suggestion.name)}
+                      disabled={!suggestion || jobLoading}
                       label="Explorer le métier sélectionné"
                     />
                   </>
