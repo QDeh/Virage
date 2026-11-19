@@ -42,9 +42,24 @@ import {
   TrendingUp,
 } from "lucide-react";
 import { Badge, Button, Card, Progress } from "./components/ui";
-import { courses, interests, jobs, roadmap, steps, strengths } from "./data";
+import { interests, steps } from "./data";
 import { useVirage } from "./store";
 import type { Profile } from "./store";
+import { analyzeJob, analyzeProfile, matchJobs } from "./api";
+import type { Training } from "./api";
+
+type SelectedJob = {
+  id: string;
+  title: string;
+  score: number;
+  description: string;
+  reason: string;
+  skills: string[];
+  existingSkills: string[];
+  duration: string;
+  roadmap: { month: number; objectives: string[] }[];
+  trainings: Training[];
+};
 
 const interestIcons = [
   Monitor,
@@ -92,14 +107,108 @@ function Heading({
   );
 }
 export default function App() {
-  const { state, update, reset } = useVirage();
+  const { state, update, reset, cvFile } = useVirage();
   const [help, setHelp] = useState(false);
   const [restart, setRestart] = useState(false);
   const [mobile, setMobile] = useState(false);
+  const [apiError, setApiError] = useState("");
+  const [jobLoading, setJobLoading] = useState(false);
   const focusRef = useRef<HTMLElement>(null);
-  const job = jobs.find((j) => j.id === state.selected) || jobs[0];
+  const suggestion =
+    state.jobs.find((candidate) => candidate.name === state.selected) ??
+    state.jobs[0];
+  const job: SelectedJob = suggestion
+    ? {
+        id: suggestion.name,
+        title: suggestion.name,
+        score: state.jobAnalysis?.compatibility ?? suggestion.score,
+        description: suggestion.description,
+        reason: suggestion.reason,
+        skills: state.jobAnalysis?.missingSkills ?? [],
+        existingSkills: state.jobAnalysis?.existingSkills ?? [],
+        duration: state.jobAnalysis?.estimatedDuration ?? "À estimer",
+        roadmap: state.jobAnalysis?.roadmap ?? [],
+        trainings: state.jobAnalysis?.trainings ?? [],
+      }
+    : {
+        id: "",
+        title: "",
+        score: 0,
+        description: "",
+        reason: "",
+        skills: [],
+        existingSkills: [],
+        duration: "À estimer",
+        roadmap: [],
+        trainings: [],
+      };
   const go = (step: number) =>
     update({ step, view: "wizard", maxStep: Math.max(state.maxStep, step) });
+  const startAnalysis = async () => {
+    if (!cvFile) {
+      setApiError("Veuillez sélectionner à nouveau votre CV avant de lancer l’analyse.");
+      return;
+    }
+    setApiError("");
+    update({ view: "loading", profileAnalysis: null, jobs: [], jobAnalysis: null });
+    try {
+      const profile = await analyzeProfile(cvFile, {
+        currentJob: state.job,
+        region: state.region,
+        hobbies: state.interests,
+        preferences: {
+          education: state.education,
+          remote: state.remote,
+          team: state.team,
+          office: state.office,
+          technical: state.technical,
+          relational: state.relational,
+          management: state.management,
+          travel: state.travel,
+          autonomy: state.autonomy,
+        },
+      });
+      const matches = await matchJobs(profile);
+      const sortedJobs = [...matches.jobs].sort((first, second) => second.score - first.score);
+      update({
+        profileAnalysis: profile,
+        jobs: sortedJobs,
+        selected: sortedJobs[0]?.name ?? "",
+        step: 3,
+        maxStep: Math.max(state.maxStep, 3),
+        view: "wizard",
+      });
+    } catch (error) {
+      setApiError(
+        error instanceof Error ? error.message : "L’analyse du profil a échoué.",
+      );
+      update({ view: "wizard" });
+    }
+  };
+  const selectJob = async (name: string) => {
+    if (!state.profileAnalysis) {
+      setApiError("Relancez l’analyse de votre profil avant de choisir un métier.");
+      return;
+    }
+    setApiError("");
+    setJobLoading(true);
+    update({ selected: name, jobAnalysis: null });
+    try {
+      const analysis = await analyzeJob(name, state.profileAnalysis);
+      update({
+        jobAnalysis: analysis,
+        step: 4,
+        maxStep: Math.max(state.maxStep, 4),
+        view: "wizard",
+      });
+    } catch (error) {
+      setApiError(
+        error instanceof Error ? error.message : "L’analyse du métier a échoué.",
+      );
+    } finally {
+      setJobLoading(false);
+    }
+  };
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "instant" });
     focusRef.current?.focus();
@@ -207,15 +316,26 @@ export default function App() {
             tabIndex={-1}
             className={`main-content ${state.view === "loading" ? "loading-main" : ""}`}
           >
+            {apiError && (
+              <p className="error" role="alert">
+                {apiError}
+              </p>
+            )}
             {state.view === "loading" ? (
-              <AnalysisLoading done={() => go(3)} />
+              <AnalysisLoading />
             ) : state.view === "dashboard" ? (
-              <Dashboard
-                state={state}
-                job={job}
-                edit={go}
-                restart={() => setRestart(true)}
-              />
+              state.jobAnalysis ? (
+                <Dashboard
+                  state={state}
+                  job={job}
+                  edit={go}
+                  restart={() => setRestart(true)}
+                />
+              ) : (
+                <p className="error" role="alert">
+                  Analysez un métier pour afficher votre parcours.
+                </p>
+              )
             ) : (
               <div key={state.step} className="step-content enter">
                 {state.step === 0 && <ProfileStep />}
@@ -402,7 +522,7 @@ export default function App() {
                     </div>
                     <BottomNav
                       back={() => go(1)}
-                      next={() => update({ view: "loading" })}
+                      next={startAnalysis}
                       label="Découvrir mes métiers"
                       icon={<Sparkles size={17} />}
                     />
@@ -422,25 +542,27 @@ export default function App() {
                       <div>
                         <strong>Votre expérience a de l’avenir.</strong>
                         <p>
-                          5 pistes pour valoriser vos compétences et donner un
-                          nouvel élan à votre carrière.
+                          {state.jobs.length} piste
+                          {state.jobs.length > 1 ? "s" : ""} pour valoriser vos
+                          compétences et donner un nouvel élan à votre carrière.
                         </p>
                       </div>
                       <Badge>Profil analysé</Badge>
                     </div>
                     <div className="results-heading">
                       <h2>
-                        Vos recommandations <span>5 métiers</span>
+                        Vos recommandations{" "}
+                        <span>{state.jobs.length} métiers</span>
                       </h2>
                       <span className="muted small">
                         Triés par compatibilité
                       </span>
                     </div>
                     <div className="jobs-grid">
-                      {jobs.map((j, i) => (
+                      {state.jobs.map((j, i) => (
                         <Card
                           className={`job-card ${i === 0 ? "best-match" : ""}`}
-                          key={j.id}
+                          key={j.name}
                           style={{ animationDelay: `${i * 65}ms` }}
                         >
                           {i === 0 && (
@@ -465,14 +587,8 @@ export default function App() {
                               <span>de compatibilité</span>
                             </span>
                           </div>
-                          <span className="category">{j.category}</span>
-                          <h2>{j.title}</h2>
+                          <h2>{j.name}</h2>
                           <p>{j.description}</p>
-                          <div className="job-tags">
-                            {j.tags.map((t) => (
-                              <Badge key={t}>{t}</Badge>
-                            ))}
-                          </div>
                           <div className="why">
                             <strong>
                               <Lightbulb size={14} /> Pourquoi ce métier ?
@@ -482,16 +598,13 @@ export default function App() {
                           <div className="job-meta">
                             <span>
                               <Clock3 size={14} />
-                              {j.duration} mois estimés
+                              Durée à estimer après analyse
                             </span>
-                            <span>{j.salary}</span>
                           </div>
                           <Button
                             variant={i === 0 ? "default" : "outline"}
-                            onClick={() => {
-                              update({ selected: j.id });
-                              go(4);
-                            }}
+                            disabled={jobLoading}
+                            onClick={() => void selectJob(j.name)}
                           >
                             Voir le parcours
                             <ArrowRight size={16} />
@@ -499,14 +612,20 @@ export default function App() {
                         </Card>
                       ))}
                     </div>
-                    <div className="demo-note">
-                      <CircleHelp size={16} /> Recommandations et scores simulés
-                      pour la démonstration. Ils ne constituent pas un bilan
-                      professionnel.
+                    {!state.jobs.length && (
+                      <p className="muted">
+                        Aucun métier compatible n’a été retourné. Modifiez
+                        votre profil et relancez l’analyse.
+                      </p>
+                    )}
+                    <div className="info-banner">
+                      <Lightbulb size={20} />
+                      <p>{state.profileAnalysis?.profileSummary}</p>
                     </div>
                     <BottomNav
                       back={() => go(2)}
-                      next={() => go(4)}
+                      next={() => suggestion && void selectJob(suggestion.name)}
+                      disabled={!suggestion || jobLoading}
                       label="Explorer le métier sélectionné"
                     />
                   </>
@@ -544,7 +663,7 @@ export default function App() {
                       <Card className="duration-card">
                         <Clock3 size={25} />
                         <span>Temps de progression estimé</span>
-                        <strong>{job.duration} mois</strong>
+                        <strong>{job.duration}</strong>
                         <p>Un rythme à adapter à vos disponibilités.</p>
                       </Card>
                     </div>
@@ -557,11 +676,10 @@ export default function App() {
                         <p className="muted small">
                           Un socle solide sur lequel vous appuyer.
                         </p>
-                        {strengths.map((s) => (
+                        {job.existingSkills.map((s) => (
                           <div className="skill-line" key={s}>
                             <Check size={17} />
                             {s}
-                            <Badge>Transférable</Badge>
                           </div>
                         ))}
                       </Card>
@@ -608,34 +726,23 @@ export default function App() {
                       <Card className="form-card roadmap-card">
                         <div className="section-title">
                           <h2>De votre expérience à {job.title}</h2>
-                          <Badge>{job.duration} mois</Badge>
+                          <Badge>{job.duration}</Badge>
                         </div>
                         <div className="timeline">
-                          {roadmap(job).map((items, i) => (
-                            <div className="timeline-item" key={i}>
+                          {job.roadmap.map((step) => (
+                            <div className="timeline-item" key={step.month}>
                               <span className="timeline-dot">
-                                {i === job.duration - 1 ? (
+                                {step.month === job.roadmap.length ? (
                                   <Flag size={17} />
                                 ) : (
-                                  String(i + 1).padStart(2, "0")
+                                  String(step.month).padStart(2, "0")
                                 )}
                               </span>
                               <div>
-                                <span className="eyebrow">MOIS {i + 1}</span>
-                                <h3>
-                                  {
-                                    [
-                                      "Poser les fondations",
-                                      "Développer les bons outils",
-                                      "Passer à la pratique",
-                                      "Consolider vos acquis",
-                                      "Vous confronter au terrain",
-                                      "Prendre votre nouveau départ",
-                                    ][i]
-                                  }
-                                </h3>
+                                <span className="eyebrow">MOIS {step.month}</span>
+                                <h3>{step.objectives[0] ?? `Étape ${step.month}`}</h3>
                                 <div className="timeline-tags">
-                                  {items.map((item) => (
+                                  {step.objectives.map((item) => (
                                     <Badge key={item}>
                                       <Check size={12} />
                                       {item}
@@ -685,28 +792,25 @@ export default function App() {
                       title="Formations recommandées"
                       description="Des pistes de formation pour transformer votre projet en compétences concrètes."
                     />
-                    {job.id !== "support" && (
-                      <div className="info-banner">
-                        <CircleHelp size={20} />
-                        <p>
-                          Le catalogue de démonstration présente des exemples en
-                          informatique. Vérifiez leur pertinence pour le métier
-                          de {job.title.toLowerCase()} avec un conseiller.
-                        </p>
-                      </div>
-                    )}
                     <div className="courses-grid">
-                      {courses.map((course) => (
-                        <CourseCard key={course.id} course={course} />
+                      {job.trainings.map((training) => (
+                        <CourseCard
+                          key={`${training.title}-${training.organization}`}
+                          course={training}
+                        />
                       ))}
                     </div>
+                    {!job.trainings.length && (
+                      <p className="muted">
+                        Aucune formation n’a été recommandée pour ce métier.
+                      </p>
+                    )}
                     <div className="info-banner">
                       <Lightbulb size={20} />
                       <p>
                         <strong>Pensez au financement.</strong> Votre CPF,
                         France Travail ou votre région peuvent vous accompagner.
-                        Les durées et niveaux affichés sont des exemples à
-                        vérifier auprès des organismes.
+                        Vérifiez les conditions auprès des organismes.
                       </p>
                     </div>
                     <Card className="finish-card">
@@ -739,9 +843,9 @@ export default function App() {
           <span>Trouvez votre prochaine voie professionnelle.</span>
         </div>
         <p>
-          <ShieldCheck size={14} /> Vos données restent sur cet appareil
+          <ShieldCheck size={14} /> Votre CV est transmis au backend pour analyse
           <span className="footer-separator">·</span>
-          <span>Projet de démonstration · 2026</span>
+          <span>Pivot AI · 2026</span>
         </p>
       </footer>
       {help && (
@@ -755,9 +859,9 @@ export default function App() {
             modifier vos réponses.
           </p>
           <p>
-            Cette démonstration fonctionne sans serveur : votre CV n’est pas
-            envoyé et les résultats sont simulés. Seul le nom du fichier est
-            conservé dans ce navigateur.
+            Votre CV est transmis au backend puis au workflow d’analyse n8n.
+            Seul son nom et les résultats sont conservés dans ce navigateur ;
+            le fichier lui-même n’est pas sauvegardé.
           </p>
           <a
             className="text-link"
@@ -1017,7 +1121,7 @@ function Landing({ start, resume }: { start: () => void; resume: boolean }) {
 }
 
 function ProfileStep() {
-  const { state, update } = useVirage();
+  const { state, update, cvFile, setCvFile } = useVirage();
   const [drag, setDrag] = useState(false);
   const [error, setError] = useState("");
   const input = useRef<HTMLInputElement>(null);
@@ -1032,6 +1136,7 @@ function ProfileStep() {
       return;
     }
     setError("");
+    setCvFile(file);
     update({ cv: file.name });
   };
   const drop = (e: DragEvent) => {
@@ -1039,7 +1144,9 @@ function ProfileStep() {
     setDrag(false);
     acceptFile(e.dataTransfer.files[0]);
   };
-  const valid = Boolean(state.job.trim() && state.region && state.education);
+  const valid = Boolean(
+    state.job.trim() && state.region && state.education && cvFile,
+  );
   return (
     <>
       <Heading
@@ -1061,7 +1168,7 @@ function ProfileStep() {
             <span className="muted small">* Champs obligatoires</span>
           </div>
           <label className="field-label" htmlFor="cv">
-            Votre CV <span className="optional">Facultatif</span>
+            Votre CV *
           </label>
           <div
             className={`upload-zone ${drag ? "dragging" : ""} ${state.cv ? "has-file" : ""}`}
@@ -1077,6 +1184,7 @@ function ProfileStep() {
               id="cv"
               type="file"
               accept=".pdf,.docx"
+              required={!cvFile}
               onChange={(e) => acceptFile(e.target.files?.[0])}
               className="sr-only"
             />
@@ -1086,12 +1194,17 @@ function ProfileStep() {
             {state.cv ? (
               <>
                 <strong className="file-name">{state.cv}</strong>
-                <span>Fichier sélectionné · aucun envoi au serveur</span>
+                <span>
+                  {cvFile
+                    ? "Prêt pour l’analyse de votre profil"
+                    : "Fichier à sélectionner à nouveau pour l’analyse"}
+                </span>
                 <button
                   type="button"
                   className="text-link"
                   onClick={() => {
                     update({ cv: "" });
+                    setCvFile(null);
                     if (input.current) input.current.value = "";
                   }}
                 >
@@ -1117,8 +1230,8 @@ function ProfileStep() {
             </p>
           )}
           <p className="upload-note">
-            <LockKeyhole size={12} /> Votre document reste sur votre appareil.
-            Analyse simulée dans cette démo.
+            <LockKeyhole size={12} /> Votre CV sera transmis au backend pour
+            analyse, puis envoyé au workflow sécurisé.
           </p>
           <div className="form-fields">
             <div className="field full">
@@ -1337,23 +1450,15 @@ const loadingMessages = [
   "Calcul des scores de compatibilité…",
   "Génération de recommandations…",
 ];
-function AnalysisLoading({ done }: { done: () => void }) {
+function AnalysisLoading() {
   const [progress, setProgress] = useState(0);
-  const doneRef = useRef(done);
-  doneRef.current = done;
   useEffect(() => {
     const timer = window.setInterval(
-      () => setProgress((p) => Math.min(100, p + 1)),
-      75,
+      () => setProgress((p) => Math.min(90, p + 1)),
+      120,
     );
     return () => clearInterval(timer);
   }, []);
-  useEffect(() => {
-    if (progress === 100) {
-      const timer = setTimeout(() => doneRef.current(), 650);
-      return () => clearTimeout(timer);
-    }
-  }, [progress]);
   const index = Math.min(7, Math.floor(progress / 12.6));
   return (
     <Card className="loading-card">
@@ -1365,7 +1470,7 @@ function AnalysisLoading({ done }: { done: () => void }) {
         Relions vos talents
         <br />à de nouvelles possibilités.
       </h1>
-      <p>Nous préparons vos recommandations de démonstration.</p>
+      <p>Nous préparons vos recommandations personnalisées.</p>
       <div className="loading-status" role="status" aria-live="polite">
         <span>{loadingMessages[index]}</span>
         <strong>{progress}%</strong>
@@ -1383,23 +1488,22 @@ function AnalysisLoading({ done }: { done: () => void }) {
           ))}
       </div>
       <span className="muted small">
-        <ShieldCheck size={14} /> Votre CV n’est transmis à aucun service.
+        <ShieldCheck size={14} /> Analyse en cours via le backend et n8n.
       </span>
     </Card>
   );
 }
-function CourseCard({ course }: { course: (typeof courses)[number] }) {
+function CourseCard({ course }: { course: Training }) {
   return (
     <Card className="course-card">
       <div className="course-provider">
-        <span className={`provider-logo ${course.color}`}>
-          {course.initials}
+        <span className="provider-logo purple">
+          {course.organization.slice(0, 3).toUpperCase()}
         </span>
         <Badge>Formation</Badge>
       </div>
-      <span className="eyebrow">{course.short}</span>
       <h2>{course.title}</h2>
-      <p className="provider-name">{course.provider}</p>
+      <p className="provider-name">{course.organization}</p>
       <div className="course-meta">
         <span>
           <Clock3 size={15} />
@@ -1410,18 +1514,19 @@ function CourseCard({ course }: { course: (typeof courses)[number] }) {
           {course.level}
         </span>
       </div>
-      <p>{course.description}</p>
-      <Button asChild variant="outline">
-        <a href={course.url} target="_blank" rel="noreferrer">
-          Consulter
-          <ExternalLink size={15} />
-        </a>
-      </Button>
+      {course.url && (
+        <Button asChild variant="outline">
+          <a href={course.url} target="_blank" rel="noreferrer">
+            Consulter
+            <ExternalLink size={15} />
+          </a>
+        </Button>
+      )}
     </Card>
   );
 }
 
-async function downloadReport(state: Profile, job: (typeof jobs)[number]) {
+async function downloadReport(state: Profile, job: SelectedJob) {
   const { jsPDF } = await import("jspdf");
   const doc = new jsPDF();
   let y = 25;
@@ -1444,7 +1549,7 @@ async function downloadReport(state: Profile, job: (typeof jobs)[number]) {
   doc.setTextColor(37, 99, 235);
   text("virage. — Votre projet professionnel", 23);
   doc.setTextColor(55, 65, 81);
-  text(`Rapport de demonstration · ${new Date().toLocaleDateString("fr-FR")}`);
+  text(`Rapport Pivot AI · ${new Date().toLocaleDateString("fr-FR")}`);
   text("PROFIL", 14);
   text(`${state.job} | ${state.region} | ${state.education}`);
   text(`Teletravail : ${state.remote} | CV : ${state.cv || "Non fourni"}`);
@@ -1456,21 +1561,23 @@ async function downloadReport(state: Profile, job: (typeof jobs)[number]) {
     `Management : ${state.management ? "oui" : "non"} | Deplacements : ${state.travel ? "oui" : "non"} | Autonomie : ${state.autonomy ? "oui" : "non"}`,
   );
   text("METIER CIBLE", 14);
-  text(`${job.title} — Compatibilite simulee : ${job.score}%`);
+  text(`${job.title} — Compatibilite : ${job.score}%`);
   text(job.reason);
-  text(`Forces : ${strengths.join(", ")}`);
+  text(`Forces : ${job.existingSkills.join(", ")}`);
   text(`Competences a acquerir : ${job.skills.join(", ")}`);
-  text(`PLAN D'ACTION — ${job.duration} mois`, 14);
-  roadmap(job).forEach((items, i) =>
-    text(`Mois ${i + 1} : ${items.join(", ")}`),
+  text(`PLAN D'ACTION — ${job.duration}`, 14);
+  job.roadmap.forEach((step) =>
+    text(`Mois ${step.month} : ${step.objectives.join(", ")}`),
   );
   text("FORMATIONS A EXPLORER", 14);
-  courses.forEach((c) => {
-    text(`${c.title} — ${c.provider} | ${c.duration} | ${c.level}`);
-    text(c.url, 9);
+  job.trainings.forEach((training) => {
+    text(
+      `${training.title} — ${training.organization} | ${training.duration} | ${training.level}`,
+    );
+    if (training.url) text(training.url, 9);
   });
   text(
-    "Resultats, scores et formations simules. Ce document ne constitue pas un bilan de competences. Verifiez les formations, conditions et financements avec un conseiller.",
+    "Ces recommandations sont indicatives et ne constituent pas un bilan de competences. Verifiez les formations, conditions et financements avec un conseiller.",
     9,
   );
   doc.save("Virage-mon-projet-professionnel.pdf");
@@ -1482,7 +1589,7 @@ function Dashboard({
   restart,
 }: {
   state: Profile;
-  job: (typeof jobs)[number];
+  job: SelectedJob;
   edit: (step: number) => void;
   restart: () => void;
 }) {
@@ -1502,8 +1609,7 @@ function Dashboard({
           </Badge>
           <h2>{job.title}</h2>
           <p>
-            {job.duration} mois pour construire les compétences de votre
-            prochain métier.
+            {job.duration} pour construire les compétences de votre prochain métier.
           </p>
         </div>
         <div className="dashboard-score">
@@ -1511,7 +1617,7 @@ function Dashboard({
             {job.score}
             <small>%</small>
           </strong>
-          <span>de compatibilité simulée</span>
+          <span>de compatibilité</span>
         </div>
       </Card>
       <div className="dashboard-grid">
@@ -1546,6 +1652,9 @@ function Dashboard({
               <dd>{state.cv || "Non fourni"}</dd>
             </div>
           </dl>
+          {state.profileAnalysis && (
+            <p className="muted small">{state.profileAnalysis.profileSummary}</p>
+          )}
           <div className="section-title">
             <h3>Centres d’intérêt</h3>
             <button className="text-link" onClick={() => edit(1)}>
@@ -1565,7 +1674,7 @@ function Dashboard({
           <p className="muted small">{job.reason}</p>
           <h3 className="green">Forces</h3>
           <div className="job-tags">
-            {strengths.map((s) => (
+            {job.existingSkills.map((s) => (
               <Badge className="badge-green" key={s}>
                 <Check size={12} />
                 {s}
@@ -1590,10 +1699,10 @@ function Dashboard({
               Voir le parcours
             </button>
           </div>
-          {roadmap(job).map((items, i) => (
-            <div className="summary-month" key={i}>
-              <span>M{i + 1}</span>
-              <p>{items.join(" · ")}</p>
+          {job.roadmap.map((step) => (
+            <div className="summary-month" key={step.month}>
+              <span>M{step.month}</span>
+              <p>{step.objectives.join(" · ")}</p>
             </div>
           ))}
         </Card>
@@ -1606,28 +1715,26 @@ function Dashboard({
               Tout voir
             </button>
           </div>
-          {courses.map((c) => (
+          {job.trainings.map((training) => (
             <a
               className="summary-course"
-              key={c.id}
-              href={c.url}
+              key={`${training.title}-${training.organization}`}
+              href={training.url || undefined}
               target="_blank"
               rel="noreferrer"
             >
-              <span className={`provider-logo ${c.color}`}>{c.initials}</span>
+              <span className="provider-logo purple">
+                {training.organization.slice(0, 3).toUpperCase()}
+              </span>
               <div>
-                <strong>{c.title}</strong>
+                <strong>{training.title}</strong>
                 <span>
-                  {c.provider} · {c.duration}
+                  {training.organization} · {training.duration}
                 </span>
               </div>
-              <ExternalLink size={15} />
+              {training.url && <ExternalLink size={15} />}
             </a>
           ))}
-          <p className="muted small">
-            Exemples du catalogue informatique de démonstration, à valider selon
-            votre projet.
-          </p>
         </Card>
       </div>
       <div className="dashboard-actions">
@@ -1660,8 +1767,9 @@ function Dashboard({
         </p>
       )}
       <div className="demo-note">
-        <ShieldCheck size={16} /> Résultats simulés. Pour concrétiser votre
-        projet, échangez avec un conseiller en évolution professionnelle.
+        <ShieldCheck size={16} /> Ces recommandations sont indicatives.
+        Échangez avec un conseiller en évolution professionnelle pour
+        concrétiser votre projet.
       </div>
     </div>
   );

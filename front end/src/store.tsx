@@ -5,6 +5,11 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import type {
+  JobAnalysisResponse,
+  JobSuggestion,
+  ProfileAnalysisResponse,
+} from "./api";
 export type Profile = {
   job: string;
   region: string;
@@ -20,6 +25,9 @@ export type Profile = {
   travel: boolean;
   autonomy: boolean;
   selected: string;
+  profileAnalysis: ProfileAnalysisResponse | null;
+  jobs: JobSuggestion[];
+  jobAnalysis: JobAnalysisResponse | null;
   step: number;
   maxStep: number;
   view: "home" | "wizard" | "loading" | "dashboard";
@@ -38,7 +46,10 @@ export const initial: Profile = {
   management: false,
   travel: false,
   autonomy: true,
-  selected: "support",
+  selected: "",
+  profileAnalysis: null,
+  jobs: [],
+  jobAnalysis: null,
   step: 0,
   maxStep: 0,
   view: "home",
@@ -46,21 +57,27 @@ export const initial: Profile = {
 const Context = createContext<{
   state: Profile;
   update: (data: Partial<Profile>) => void;
+  cvFile: File | null;
+  setCvFile: (file: File | null) => void;
   reset: () => void;
 } | null>(null);
 export function Provider({ children }: { children: ReactNode }) {
+  const [cvFile, setCvFile] = useState<File | null>(null);
   const [state, setState] = useState<Profile>(() => {
     try {
       const saved = JSON.parse(
         localStorage.getItem("virage-profile") || "null",
       );
-      return saved
-        ? {
-            ...initial,
-            ...saved,
-            view: saved.view === "loading" ? "wizard" : saved.view,
-          }
-        : initial;
+      if (!saved) return initial;
+      const restored = { ...initial, ...saved };
+      if (!Array.isArray(saved.jobs) && saved.step >= 3) {
+        restored.step = 2;
+        restored.maxStep = Math.min(saved.maxStep ?? 0, 2);
+        restored.selected = "";
+        restored.view = "wizard";
+      }
+      if (saved.view === "loading") restored.view = "wizard";
+      return restored;
     } catch {
       return initial;
     }
@@ -77,7 +94,12 @@ export function Provider({ children }: { children: ReactNode }) {
       value={{
         state,
         update: (data) => setState((s) => ({ ...s, ...data })),
-        reset: () => setState({ ...initial, view: "wizard" }),
+        cvFile,
+        setCvFile,
+        reset: () => {
+          setCvFile(null);
+          setState({ ...initial, view: "wizard" });
+        },
       }}
     >
       {children}
