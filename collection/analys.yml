@@ -1,0 +1,16 @@
+info:
+  name: analys
+  type: http
+  seq: 1
+
+http:
+  method: POST
+  url: https://n8n.hackeuse.fr/webhook-test/virage/profile-analysis
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+  forwardAuthorizationHeader: false
