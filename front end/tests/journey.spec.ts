@@ -11,6 +11,19 @@ async function mockBackend(page: import("@playwright/test").Page) {
         softSkills: ["Écoute"],
         transferableSkills: ["Relation client"],
         profileSummary: "Profil orienté relation client et résolution de problèmes.",
+        region: "Nouvelle-Aquitaine",
+        hobbies: ["Informatique", "Relation client"],
+        preferences: {
+          education: "Bac +2",
+          remote: "Hybride",
+          team: 65,
+          office: 70,
+          technical: 60,
+          relational: 75,
+          management: false,
+          travel: false,
+          autonomy: true,
+        },
       }),
     });
   });
@@ -228,4 +241,25 @@ test("validation du profil et sélection multiple réversible", async ({
   await expect(
     page.getByLabel("Métier actuel ou dernier métier exercé"),
   ).toHaveValue("Conseiller");
+});
+
+test("le CV est facultatif pour continuer le parcours", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Commencer mon analyse" }).click();
+  await page.getByRole("button", { name: "Continuer", exact: true }).click();
+  await page
+    .getByLabel("Métier actuel ou dernier métier exercé")
+    .fill("Conseiller");
+  await page.getByLabel("Région recherchée").selectOption("Bretagne");
+  await page.getByLabel("Niveau d’études").selectOption("Baccalauréat");
+
+  await expect(
+    page.getByRole("button", { name: "Continuer", exact: true }),
+  ).toBeEnabled();
+  await page.getByRole("button", { name: "Continuer", exact: true }).click();
+  await expect(
+    page.getByRole("heading", {
+      name: "Parlez-nous de ce qui vous motive",
+    }),
+  ).toBeVisible();
 });

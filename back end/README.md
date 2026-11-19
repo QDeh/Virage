@@ -26,10 +26,10 @@ Swagger UI : `http://localhost:8080/swagger-ui.html` — OpenAPI : `http://local
 ## API
 
 - `GET /api/health`
-- `POST /api/profile/analyze` — multipart : `cv` (PDF ou DOCX, obligatoire, 10 Mo maximum), `currentJob`, `region`, `hobbies[]` (répétable) et les propriétés facultatives `preferences.education`, `preferences.remote`, `preferences.team`, `preferences.office`, `preferences.technical`, `preferences.relational`, `preferences.management`, `preferences.travel` et `preferences.autonomy`.
+- `POST /api/profile/analyze` — multipart : `cv` (PDF ou DOCX, facultatif, 10 Mo maximum), `currentJob`, `region`, `hobbies[]` (répétable) et les propriétés facultatives `preferences.education`, `preferences.remote`, `preferences.team`, `preferences.office`, `preferences.technical`, `preferences.relational`, `preferences.management`, `preferences.travel` et `preferences.autonomy`.
 - `POST /api/jobs/match` — JSON `ProfileAnalysisResponse`.
 - `POST /api/jobs/{jobId}/analysis` — JSON `ProfileAnalysisResponse`; `jobId` est le métier sélectionné.
 
-Les erreurs ont le format `{ "timestamp", "status", "error", "message", "path" }`. Le CV est encodé en Base64 uniquement pour son transfert au webhook n8n et n’est pas écrit sur disque. Le workflow de profil reçoit `cvFileName`, `cvContentType`, `cvBase64`, `currentJob`, `region`, `hobbies` et `preferences`. Le workflow de reconversion reçoit `{ "profile": ..., "selectedJob": "..." }`. Les trois webhooks doivent répondre avec les objets JSON définis par leurs DTOs.
+Les erreurs ont le format `{ "timestamp", "status", "error", "message", "path" }`. Si un CV est fourni, il est encodé en Base64 uniquement pour son transfert au webhook n8n et n’est pas écrit sur disque. Le workflow de profil reçoit `cvFileName`, `cvContentType` et `cvBase64` (nulls si aucun CV n’est fourni), ainsi que `currentJob`, `region`, `hobbies` et `preferences`. Sans CV, l’analyse se fonde sur les autres informations du profil. Sa réponse contient les compétences, le résumé, ainsi que `region`, `hobbies` et `preferences` repris des données du formulaire. Le workflow de reconversion reçoit `{ "profile": ..., "selectedJob": "..." }`. Les trois webhooks doivent répondre avec les objets JSON définis par leurs DTOs.
 
 Les réponses `application/json` renvoyées par n8n sont désérialisées directement. Une erreur ou une absence de réponse du workflow est convertie en erreur HTTP 502 ; les expirations sont signalées en 504.

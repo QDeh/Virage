@@ -28,12 +28,15 @@ public class ProfileAnalysisService {
 
     public ProfileAnalysisResponse analyze(ProfileAnalysisRequest request) {
         MultipartFile cv = request.getCv();
-        validateFile(cv);
+        boolean hasCv = cv != null && !cv.isEmpty();
+        if (hasCv) {
+            validateFile(cv);
+        }
         try {
             N8nProfileAnalysisRequest workflowRequest = new N8nProfileAnalysisRequest(
-                    StringUtils.cleanPath(cv.getOriginalFilename()),
-                    cv.getContentType(),
-                    Base64.getEncoder().encodeToString(cv.getBytes()),
+                    hasCv ? StringUtils.cleanPath(cv.getOriginalFilename()) : null,
+                    hasCv ? cv.getContentType() : null,
+                    hasCv ? Base64.getEncoder().encodeToString(cv.getBytes()) : null,
                     request.getCurrentJob().trim(),
                     request.getRegion().trim(),
                     request.getHobbies() == null ? List.of() : List.copyOf(request.getHobbies()),
@@ -46,10 +49,6 @@ public class ProfileAnalysisService {
     }
 
     private void validateFile(MultipartFile cv) {
-        if (cv == null || cv.isEmpty()) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "INVALID_FILE",
-                    "Le CV est obligatoire et ne peut pas être vide.");
-        }
         if (cv.getSize() > MAX_FILE_SIZE) {
             throw new BusinessException(HttpStatus.PAYLOAD_TOO_LARGE, "FILE_TOO_LARGE",
                     "Le fichier ne doit pas dépasser 10 Mo.");

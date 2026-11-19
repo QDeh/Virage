@@ -28,8 +28,8 @@ Les tests navigateur simulent les réponses des endpoints, mais vérifient que l
 
 ## Échanges API
 
-- L’envoi du CV en PDF/DOCX (10 Mo maximum) et des préférences en multipart déclenche l’analyse du profil.
+- L’envoi facultatif du CV en PDF/DOCX (10 Mo maximum) et des préférences en multipart déclenche l’analyse du profil. Sans CV, l’analyse utilise les informations de profil saisies.
 - Les compétences obtenues alimentent la recherche des métiers compatibles.
 - Le choix d’un métier déclenche l’analyse de compatibilité, le parcours et les formations.
 
-Le navigateur conserve les réponses et les réponses du backend dans `localStorage`, mais pas le fichier CV. Après rechargement, il faut sélectionner le CV de nouveau avant une nouvelle analyse de profil.
+Le navigateur conserve les réponses et les réponses du backend dans `localStorage`, mais pas le fichier CV. Après rechargement, il faut sélectionner le CV de nouveau pour le joindre à une analyse ; il reste possible de poursuivre sans CV.

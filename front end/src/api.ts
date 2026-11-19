@@ -3,6 +3,19 @@ export type ProfileAnalysisResponse = {
   softSkills: string[];
   transferableSkills: string[];
   profileSummary: string;
+  region: string;
+  hobbies: string[];
+  preferences: {
+    education: string | null;
+    remote: string | null;
+    team: number | null;
+    office: number | null;
+    technical: number | null;
+    relational: number | null;
+    management: boolean | null;
+    travel: boolean | null;
+    autonomy: boolean | null;
+  } | null;
 };
 
 export type JobSuggestion = {
@@ -62,7 +75,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export function analyzeProfile(
-  cv: File,
+  cv: File | null,
   profile: {
     currentJob: string;
     region: string;
@@ -81,7 +94,7 @@ export function analyzeProfile(
   },
 ) {
   const form = new FormData();
-  form.append("cv", cv);
+  if (cv) form.append("cv", cv);
   form.append("currentJob", profile.currentJob);
   form.append("region", profile.region);
   profile.hobbies.forEach((hobby) => form.append("hobbies[]", hobby));

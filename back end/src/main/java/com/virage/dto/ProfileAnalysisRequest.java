@@ -19,7 +19,6 @@ import java.util.List;
 @Schema(description = "Données du profil envoyées pour analyse")
 public class ProfileAnalysisRequest {
 
-    @NotNull(message = "Le CV est obligatoire.")
     @Schema(type = "string", format = "binary")
     private MultipartFile cv;
 

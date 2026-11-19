@@ -145,10 +145,6 @@ export default function App() {
   const go = (step: number) =>
     update({ step, view: "wizard", maxStep: Math.max(state.maxStep, step) });
   const startAnalysis = async () => {
-    if (!cvFile) {
-      setApiError("Veuillez sélectionner à nouveau votre CV avant de lancer l’analyse.");
-      return;
-    }
     setApiError("");
     update({ view: "loading", profileAnalysis: null, jobs: [], jobAnalysis: null });
     try {
@@ -843,7 +839,7 @@ export default function App() {
           <span>Trouvez votre prochaine voie professionnelle.</span>
         </div>
         <p>
-          <ShieldCheck size={14} /> Votre CV est transmis au backend pour analyse
+          <ShieldCheck size={14} /> Votre CV est facultatif et transmis uniquement si vous le joignez
           <span className="footer-separator">·</span>
           <span>Pivot AI · 2026</span>
         </p>
@@ -859,9 +855,10 @@ export default function App() {
             modifier vos réponses.
           </p>
           <p>
-            Votre CV est transmis au backend puis au workflow d’analyse n8n.
-            Seul son nom et les résultats sont conservés dans ce navigateur ;
-            le fichier lui-même n’est pas sauvegardé.
+            Vous pouvez joindre un CV (PDF ou DOCX) pour enrichir l’analyse, ou
+            continuer sans CV à partir des informations de votre profil. Le
+            fichier est transmis au backend puis au workflow d’analyse n8n ;
+            seul son nom et les résultats sont conservés dans ce navigateur.
           </p>
           <a
             className="text-link"
@@ -1145,7 +1142,7 @@ function ProfileStep() {
     acceptFile(e.dataTransfer.files[0]);
   };
   const valid = Boolean(
-    state.job.trim() && state.region && state.education && cvFile,
+    state.job.trim() && state.region && state.education,
   );
   return (
     <>
@@ -1168,7 +1165,7 @@ function ProfileStep() {
             <span className="muted small">* Champs obligatoires</span>
           </div>
           <label className="field-label" htmlFor="cv">
-            Votre CV *
+            Votre CV <span className="muted small">(facultatif)</span>
           </label>
           <div
             className={`upload-zone ${drag ? "dragging" : ""} ${state.cv ? "has-file" : ""}`}
@@ -1184,7 +1181,6 @@ function ProfileStep() {
               id="cv"
               type="file"
               accept=".pdf,.docx"
-              required={!cvFile}
               onChange={(e) => acceptFile(e.target.files?.[0])}
               className="sr-only"
             />
@@ -1230,8 +1226,9 @@ function ProfileStep() {
             </p>
           )}
           <p className="upload-note">
-            <LockKeyhole size={12} /> Votre CV sera transmis au backend pour
-            analyse, puis envoyé au workflow sécurisé.
+            <LockKeyhole size={12} /> Sans CV, l’analyse s’appuie sur les
+            informations de votre profil. Votre CV n’est transmis que si vous
+            choisissez de le joindre.
           </p>
           <div className="form-fields">
             <div className="field full">
@@ -1595,6 +1592,7 @@ function Dashboard({
 }) {
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState("");
+  const preferences = state.profileAnalysis?.preferences;
   return (
     <div className="enter">
       <Heading
@@ -1637,7 +1635,7 @@ function Dashboard({
             </div>
             <div>
               <dt>Région</dt>
-              <dd>{state.region}</dd>
+              <dd>{state.profileAnalysis?.region || state.region}</dd>
             </div>
             <div>
               <dt>Niveau d’études</dt>
@@ -1662,10 +1660,54 @@ function Dashboard({
             </button>
           </div>
           <div className="job-tags">
-            {state.interests.map((i) => (
+            {(state.profileAnalysis?.hobbies ?? state.interests).map((i) => (
               <Badge key={i}>{i}</Badge>
             ))}
           </div>
+          <div className="section-title">
+            <h3>Environnement de travail souhaité</h3>
+            <button className="text-link" onClick={() => edit(2)}>
+              Modifier
+            </button>
+          </div>
+          <dl className="profile-summary">
+            <div>
+              <dt>Mode de collaboration</dt>
+              <dd>
+                {preferences?.team ?? state.team}% équipe ·{" "}
+                {100 - (preferences?.team ?? state.team)}% individuel
+              </dd>
+            </div>
+            <div>
+              <dt>Lieu de travail</dt>
+              <dd>
+                {preferences?.office ?? state.office}% bureau ·{" "}
+                {100 - (preferences?.office ?? state.office)}% terrain
+              </dd>
+            </div>
+            <div>
+              <dt>Orientation technique</dt>
+              <dd>{preferences?.technical ?? state.technical}%</dd>
+            </div>
+            <div>
+              <dt>Orientation relationnelle</dt>
+              <dd>{preferences?.relational ?? state.relational}%</dd>
+            </div>
+            <div>
+              <dt>Management d’équipe</dt>
+              <dd>
+                {(preferences?.management ?? state.management) ? "Oui" : "Non"}
+              </dd>
+            </div>
+            <div>
+              <dt>Déplacements fréquents</dt>
+              <dd>{(preferences?.travel ?? state.travel) ? "Oui" : "Non"}</dd>
+            </div>
+            <div>
+              <dt>Autonomie importante</dt>
+              <dd>{(preferences?.autonomy ?? state.autonomy) ? "Oui" : "Non"}</dd>
+            </div>
+          </dl>
         </Card>
         <Card className="form-card">
           <h2>

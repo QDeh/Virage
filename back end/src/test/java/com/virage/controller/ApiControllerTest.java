@@ -2,6 +2,7 @@ package com.virage.controller;
 
 import com.virage.dto.ProfileAnalysisResponse;
 import com.virage.dto.ProfileAnalysisRequest;
+import com.virage.dto.WorkPreferences;
 import com.virage.service.CareerRoadmapService;
 import com.virage.service.JobMatchingService;
 import com.virage.service.ProfileAnalysisService;
@@ -17,6 +18,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
@@ -64,7 +66,12 @@ class ApiControllerTest {
                         .param("hobbies[]", "Informatique")
                         .param("hobbies[]", "Formation"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.profileSummary").value("Profil"));
+                .andExpect(jsonPath("$.profileSummary").value("Profil"))
+                .andExpect(jsonPath("$.region").value("Bretagne"))
+                .andExpect(jsonPath("$.hobbies[0]").value("Informatique"))
+                .andExpect(jsonPath("$.hobbies[1]").value("Formation"))
+                .andExpect(jsonPath("$.preferences.education").value("Bac +2"))
+                .andExpect(jsonPath("$.preferences.team").value(65));
 
         ArgumentCaptor<ProfileAnalysisRequest> request =
                 ArgumentCaptor.forClass(ProfileAnalysisRequest.class);
@@ -73,6 +80,22 @@ class ApiControllerTest {
         assertEquals(List.of("Informatique", "Formation"), request.getValue().getHobbies());
         assertEquals("Bac +2", request.getValue().getPreferences().getEducation());
         assertEquals(Integer.valueOf(65), request.getValue().getPreferences().getTeam());
+    }
+
+    @Test
+    void profileEndpointAcceptsProfileWithoutCv() throws Exception {
+        when(profileAnalysisService.analyze(any())).thenReturn(profile());
+
+        mockMvc.perform(multipart("/api/profile/analyze")
+                        .param("currentJob", "Conseiller")
+                        .param("region", "Bretagne"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.profileSummary").value("Profil"));
+
+        ArgumentCaptor<ProfileAnalysisRequest> request =
+                ArgumentCaptor.forClass(ProfileAnalysisRequest.class);
+        verify(profileAnalysisService).analyze(request.capture());
+        assertNull(request.getValue().getCv());
     }
 
     @Test
@@ -114,6 +137,9 @@ class ApiControllerTest {
 
     private ProfileAnalysisResponse profile() {
         return new ProfileAnalysisResponse(List.of("Excel"), List.of("Écoute"),
-                List.of("Relation client"), "Profil");
+                List.of("Relation client"), "Profil", "Bretagne",
+                List.of("Informatique", "Formation"),
+                new WorkPreferences("Bac +2", "Hybride", 65, 70, 60, 75,
+                        false, false, true));
     }
 }
