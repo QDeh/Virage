@@ -3,11 +3,11 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>com.pivotai</groupId>
-    <artifactId>pivot-ai-backend</artifactId>
+    <groupId>com.virage</groupId>
+    <artifactId>virage-backend</artifactId>
     <version>0.0.1-SNAPSHOT</version>
-    <name>Pivot AI backend</name>
-    <description>API gateway between Pivot AI and its n8n workflows</description>
+    <name>Virage backend</name>
+    <description>API gateway between Virage and its n8n workflows</description>
 
     <parent>
         <groupId>org.springframework.boot</groupId>
