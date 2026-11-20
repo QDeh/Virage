@@ -26,4 +26,28 @@ public class ProfileAnalysisResponse {
 
     @NotBlank
     private String profileSummary;
+
+    private String region;
+
+    private List<String> hobbies;
+
+    private WorkPreferences preferences;
+
+    public ProfileAnalysisResponse(
+            List<String> technicalSkills,
+            List<String> softSkills,
+            List<String> transferableSkills,
+            String profileSummary) {
+        this(technicalSkills, softSkills, transferableSkills, profileSummary, null, null, null);
+    }
+
+    public ProfileAnalysisResponse(
+            List<String> technicalSkills,
+            List<String> softSkills,
+            List<String> transferableSkills,
+            String profileSummary,
+            String region,
+            List<String> hobbies) {
+        this(technicalSkills, softSkills, transferableSkills, profileSummary, region, hobbies, null);
+    }
 }

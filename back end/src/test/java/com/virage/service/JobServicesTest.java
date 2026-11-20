@@ -39,6 +39,18 @@ class JobServicesTest {
     }
 
     @Test
+    void matchingRejectsWorkflowResponseWithoutJobsArray() {
+        ProfileAnalysisResponse profile = profile();
+        when(n8nClient.matchJobs(profile)).thenReturn(new JobMatchResponse(null));
+
+        BusinessException exception = assertThrows(
+                BusinessException.class, () -> jobMatchingService.match(profile));
+
+        assertEquals(HttpStatus.BAD_GATEWAY, exception.getStatus());
+        assertEquals("INVALID_JOB_MATCH_RESPONSE", exception.getCode());
+    }
+
+    @Test
     void roadmapDelegatesSelectedJobAndProfileToWorkflow() {
         CareerRoadmapService service = new CareerRoadmapService(n8nClient);
         ProfileAnalysisResponse profile = profile();

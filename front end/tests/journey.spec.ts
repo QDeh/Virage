@@ -1,6 +1,75 @@
 import { expect, test } from "@playwright/test";
 
+async function mockSupabase(page: import("@playwright/test").Page) {
+  let savedProfile: Record<string, unknown> | null = null;
+  await page.route("https://virage-test.supabase.co/**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (url.pathname === "/auth/v1/token") {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          access_token: "test-access-token",
+          token_type: "bearer",
+          expires_in: 3600,
+          refresh_token: "test-refresh-token",
+          user: {
+            id: "00000000-0000-4000-8000-000000000001",
+            aud: "authenticated",
+            role: "authenticated",
+            email: "personne@example.com",
+            app_metadata: { provider: "email", providers: ["email"] },
+            user_metadata: {},
+            created_at: "2026-01-01T00:00:00.000Z",
+          },
+        }),
+      });
+      return;
+    }
+    if (url.pathname === "/rest/v1/virage_profiles") {
+      if (request.method() === "GET") {
+        await route.fulfill({
+          contentType: "application/json",
+          body: JSON.stringify(savedProfile),
+        });
+      } else {
+        const body = request.postDataJSON() as Record<string, unknown>;
+        savedProfile = { ...savedProfile, ...body };
+        await route.fulfill({ status: 204, body: "" });
+      }
+      return;
+    }
+    if (url.pathname.startsWith("/storage/v1/object/")) {
+      if (request.method() === "GET") {
+        await route.fulfill({
+          contentType: "application/pdf",
+          body: Buffer.from("%PDF-1.4 saved CV"),
+        });
+      } else if (request.method() === "DELETE") {
+        await route.fulfill({ contentType: "application/json", body: "[]" });
+      } else {
+        await route.fulfill({
+          contentType: "application/json",
+          body: JSON.stringify({ Key: url.pathname }),
+        });
+      }
+      return;
+    }
+    await route.fulfill({ status: 404, body: "Not mocked" });
+  });
+}
+
+async function signIn(page: import("@playwright/test").Page) {
+  await page.goto("/");
+  await page.getByLabel("Adresse courriel").fill("personne@example.com");
+  await page.getByLabel("Mot de passe").fill("motdepasse-test");
+  await page.getByRole("button", { name: "Se connecter" }).click();
+  await expect(page.getByRole("button", { name: "Déconnexion" }))
+    .toBeVisible();
+}
+
 async function mockBackend(page: import("@playwright/test").Page) {
+  await mockSupabase(page);
   const calls: string[] = [];
   await page.route("**/api/profile/analyze", async (route) => {
     calls.push("/api/profile/analyze");
@@ -11,6 +80,19 @@ async function mockBackend(page: import("@playwright/test").Page) {
         softSkills: ["Écoute"],
         transferableSkills: ["Relation client"],
         profileSummary: "Profil orienté relation client et résolution de problèmes.",
+        region: "Nouvelle-Aquitaine",
+        hobbies: ["Informatique", "Relation client"],
+        preferences: {
+          education: "Bac +2",
+          remote: "Hybride",
+          team: 65,
+          office: 70,
+          technical: 60,
+          relational: 75,
+          management: false,
+          travel: false,
+          autonomy: true,
+        },
       }),
     });
   });
@@ -38,6 +120,7 @@ async function mockBackend(page: import("@playwright/test").Page) {
   });
   await page.route("**/api/jobs/*/analysis", async (route) => {
     calls.push(new URL(route.request().url()).pathname);
+    await new Promise((resolve) => setTimeout(resolve, 250));
     await route.fulfill({
       contentType: "application/json",
       body: JSON.stringify({
@@ -69,7 +152,6 @@ async function mockBackend(page: import("@playwright/test").Page) {
             organization: "CNAM",
             duration: "12 mois",
             level: "Intermédiaire",
-            url: "https://example.com/cnam",
           },
         ],
       }),
@@ -84,7 +166,7 @@ test("parcours complet, sauvegarde, PDF et nouveau projet", async ({
   const apiCalls = await mockBackend(page);
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
-  await page.goto("/");
+  await signIn(page);
   await expect(
     page.getByRole("heading", { name: /Votre reconversion commence ici/ }),
   ).toBeVisible();
@@ -113,13 +195,24 @@ test("parcours complet, sauvegarde, PDF et nouveau projet", async ({
     .getByRole("button", { name: "Relation client", exact: true })
     .click();
   await page.getByRole("button", { name: "Continuer", exact: true }).click();
+  const savedAfterPreferenceChange = page.waitForResponse(
+    (response) =>
+      response.url().includes("/rest/v1/virage_profiles") &&
+      response.request().method() === "POST" &&
+      response.request().postData()?.includes('"management":true'),
+  );
   await page.getByRole("switch", { name: "Management d’équipe" }).click();
+  await expect(
+    page.getByRole("switch", { name: "Management d’équipe" }),
+  ).toBeChecked();
+  await savedAfterPreferenceChange;
   await page.reload();
   await expect(
     page.getByRole("switch", { name: "Management d’équipe" }),
   ).toBeChecked();
   await page.getByRole("button", { name: "Étape précédente" }).click();
   await page.getByRole("button", { name: "Étape précédente" }).click();
+  await expect(page.getByText("Enregistré dans votre espace privé")).toBeVisible();
   await page.locator("#cv").setInputFiles({
     name: "cv.pdf",
     mimeType: "application/pdf",
@@ -136,6 +229,44 @@ test("parcours complet, sauvegarde, PDF et nouveau projet", async ({
     .first()
     .click();
   await expect(
+    page.getByRole("heading", { name: "Votre parcours prend forme" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("progressbar", {
+      name: "Progression de la génération du parcours",
+    }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Analyse du métier et de ses besoins"),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Analyse de compatibilité" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: /Résultats/ }).click();
+  const savedRoadmapCache = page.waitForResponse(
+    (response) =>
+      response.url().includes("/rest/v1/virage_profiles") &&
+      response.request().method() === "POST",
+  );
+  await page
+    .getByRole("button", { name: "Voir le parcours", exact: true })
+    .first()
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Analyse de compatibilité" }),
+  ).toBeVisible();
+  await savedRoadmapCache;
+  await expect(page.getByText("Progression sauvegardée")).toBeVisible();
+  await page.reload();
+  await expect(
+    page.getByRole("heading", { name: "Analyse de compatibilité" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: /Résultats/ }).click();
+  await page
+    .getByRole("button", { name: "Voir le parcours", exact: true })
+    .first()
+    .click();
+  await expect(
     page.getByRole("heading", { name: "Analyse de compatibilité" }),
   ).toBeVisible();
   await page
@@ -144,8 +275,29 @@ test("parcours complet, sauvegarde, PDF et nouveau projet", async ({
   await expect(
     page.getByRole("heading", { name: "Votre feuille de route" }),
   ).toBeVisible();
+  await expect(page.getByText("MOIS 1")).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Bases réseaux" }),
+  ).toBeVisible();
   await page.getByRole("button", { name: "Trouver une formation" }).click();
-  await expect(page.getByRole("link", { name: "Consulter" })).toHaveCount(3);
+  const courseLinks = page.locator(".course-card-link");
+  await expect(courseLinks).toHaveCount(3);
+  await expect(courseLinks.first()).toHaveAttribute(
+    "href",
+    "https://example.com/afpa",
+  );
+  await expect(courseLinks.first()).toHaveAttribute("target", "_blank");
+  await expect(courseLinks.nth(2)).toHaveAttribute(
+    "href",
+    "https://www.cnam.fr/",
+  );
+  await expect(page.locator(".course-card-link .btn")).toHaveCount(0);
+  await expect(courseLinks.first()).toHaveCSS("display", "flex");
+  const providerPagePromise = page.waitForEvent("popup");
+  await courseLinks.first().click();
+  const providerPage = await providerPagePromise;
+  await expect(providerPage).toHaveURL("https://example.com/afpa");
+  await providerPage.close();
   expect(apiCalls).toEqual([
     "/api/profile/analyze",
     "/api/jobs/match",
@@ -186,7 +338,8 @@ test("parcours complet, sauvegarde, PDF et nouveau projet", async ({
 test("validation du profil et sélection multiple réversible", async ({
   page,
 }) => {
-  await page.goto("/");
+  await mockSupabase(page);
+  await signIn(page);
   await page.getByRole("button", { name: "Commencer mon analyse" }).click();
   await page.getByRole("button", { name: "Continuer", exact: true }).click();
   await expect(
@@ -228,4 +381,26 @@ test("validation du profil et sélection multiple réversible", async ({
   await expect(
     page.getByLabel("Métier actuel ou dernier métier exercé"),
   ).toHaveValue("Conseiller");
+});
+
+test("le CV est facultatif pour continuer le parcours", async ({ page }) => {
+  await mockSupabase(page);
+  await signIn(page);
+  await page.getByRole("button", { name: "Commencer mon analyse" }).click();
+  await page.getByRole("button", { name: "Continuer", exact: true }).click();
+  await page
+    .getByLabel("Métier actuel ou dernier métier exercé")
+    .fill("Conseiller");
+  await page.getByLabel("Région recherchée").selectOption("Bretagne");
+  await page.getByLabel("Niveau d’études").selectOption("Baccalauréat");
+
+  await expect(
+    page.getByRole("button", { name: "Continuer", exact: true }),
+  ).toBeEnabled();
+  await page.getByRole("button", { name: "Continuer", exact: true }).click();
+  await expect(
+    page.getByRole("heading", {
+      name: "Parlez-nous de ce qui vous motive",
+    }),
+  ).toBeVisible();
 });

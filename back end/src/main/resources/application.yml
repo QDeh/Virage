@@ -17,8 +17,8 @@ virage:
     allowed-origins: ${VIRAGE_CORS_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173}
   n8n:
     profile-analysis-url: ${N8N_PROFILE_ANALYSIS_URL:https://n8n.hackeuse.fr/webhook-test/virage/profile-analysis}
-    job-matching-url: ${N8N_JOB_MATCHING_URL:http://localhost:5678/webhook/job-matching}
-    roadmap-url: ${N8N_ROADMAP_URL:http://localhost:5678/webhook/roadmap}
+    job-matching-url: ${N8N_JOB_MATCHING_URL:https://n8n.hackeuse.fr/webhook-test/virage/job-matching}
+    roadmap-url: ${N8N_ROADMAP_URL:https://n8n.hackeuse.fr/webhook-test/virage/roadmap}
     timeout-seconds: ${N8N_TIMEOUT_SECONDS:60}
 
 springdoc:

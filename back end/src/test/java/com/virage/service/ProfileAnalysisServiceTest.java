@@ -16,6 +16,7 @@ import org.springframework.mock.web.MockMultipartFile;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -48,6 +49,26 @@ class ProfileAnalysisServiceTest {
         assertEquals("cv.pdf", payload.getValue().cvFileName());
         assertEquals("JVBERg==", payload.getValue().cvBase64());
         assertEquals(List.of("Informatique"), payload.getValue().hobbies());
+    }
+
+    @Test
+    void forwardsProfileWithoutCvToN8n() {
+        ProfileAnalysisRequest request = new ProfileAnalysisRequest(
+                null, " Conseiller ", "Bretagne", List.of("Informatique"), null);
+        ProfileAnalysisResponse expected = new ProfileAnalysisResponse(
+                List.of(), List.of(), List.of(), "Profil basé sur les informations fournies");
+        when(n8nClient.analyzeProfile(org.mockito.ArgumentMatchers.any())).thenReturn(expected);
+
+        ProfileAnalysisResponse result = service.analyze(request);
+
+        assertEquals(expected, result);
+        ArgumentCaptor<N8nProfileAnalysisRequest> payload =
+                ArgumentCaptor.forClass(N8nProfileAnalysisRequest.class);
+        verify(n8nClient).analyzeProfile(payload.capture());
+        assertNull(payload.getValue().cvFileName());
+        assertNull(payload.getValue().cvContentType());
+        assertNull(payload.getValue().cvBase64());
+        assertEquals("Conseiller", payload.getValue().currentJob());
     }
 
     @Test

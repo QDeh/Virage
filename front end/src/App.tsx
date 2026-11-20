@@ -43,10 +43,18 @@ import {
 } from "lucide-react";
 import { Badge, Button, Card, Progress } from "./components/ui";
 import { interests, steps } from "./data";
-import { useVirage } from "./store";
+import { initial, useVirage } from "./store";
 import type { Profile } from "./store";
 import { analyzeJob, analyzeProfile, matchJobs } from "./api";
 import type { Training } from "./api";
+import { useAccount } from "./account";
+import {
+  deleteCv,
+  downloadCv,
+  loadProfile,
+  saveProfile,
+  uploadCv,
+} from "./persistence";
 
 type SelectedJob = {
   id: string;
@@ -107,7 +115,12 @@ function Heading({
   );
 }
 export default function App() {
-  const { state, update, reset, cvFile } = useVirage();
+  const { state, update, replace, reset, cvFile, setCvFile } = useVirage();
+  const { user, signOut } = useAccount();
+  const [profileReady, setProfileReady] = useState(false);
+  const [profileLoadError, setProfileLoadError] = useState("");
+  const [syncError, setSyncError] = useState("");
+  const [syncing, setSyncing] = useState(false);
   const [help, setHelp] = useState(false);
   const [restart, setRestart] = useState(false);
   const [mobile, setMobile] = useState(false);
@@ -142,15 +155,117 @@ export default function App() {
         roadmap: [],
         trainings: [],
       };
+  useEffect(() => {
+    let active = true;
+    setProfileReady(false);
+    setProfileLoadError("");
+    setSyncError("");
+    const restore = async () => {
+      try {
+        const saved = await loadProfile(user.id);
+        const profile = saved?.app_state
+          ? { ...initial, ...saved.app_state }
+          : { ...initial };
+        profile.jobAnalyses = { ...(profile.jobAnalyses ?? {}) };
+        if (
+          profile.jobAnalysis &&
+          profile.selected &&
+          !Object.hasOwn(profile.jobAnalyses, profile.selected)
+        ) {
+          profile.jobAnalyses[profile.selected] = profile.jobAnalysis;
+        }
+        if (profile.view === "loading") profile.view = "wizard";
+        if (saved?.cv_path) {
+          const blob = await downloadCv(saved.cv_path);
+          profile.cvStoragePath = saved.cv_path;
+          if (active) {
+            setCvFile(
+              new File([blob], profile.cv || "cv.pdf", {
+                type: blob.type || "application/pdf",
+              }),
+            );
+          }
+        } else if (active) {
+          setCvFile(null);
+          profile.cvStoragePath = "";
+        }
+        if (active) {
+          replace(profile);
+          setProfileReady(true);
+        }
+      } catch (error) {
+        if (active) {
+          setProfileLoadError(
+            error instanceof Error
+              ? error.message
+              : "Impossible de charger votre espace personnel.",
+          );
+          setProfileReady(true);
+        }
+      }
+    };
+    void restore();
+    return () => {
+      active = false;
+    };
+  }, [user.id, replace, setCvFile]);
+  useEffect(() => {
+    if (!profileReady || profileLoadError) return;
+    setSyncing(true);
+    const timeout = window.setTimeout(() => {
+      void saveProfile(user.id, state).then(
+        () => {
+          setSyncError("");
+          setSyncing(false);
+        },
+        (error: unknown) => {
+          setSyncError(
+            error instanceof Error
+              ? error.message
+              : "La sauvegarde de votre espace a échoué.",
+          );
+          setSyncing(false);
+        },
+      );
+    }, 500);
+    return () => window.clearTimeout(timeout);
+  }, [profileReady, profileLoadError, state, user.id]);
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "instant" });
+    focusRef.current?.focus();
+    const activeStep = document.querySelector<HTMLElement>(".step.current");
+    const stepper = activeStep?.parentElement;
+    if (activeStep && stepper) {
+      stepper.scrollLeft +=
+        activeStep.getBoundingClientRect().left -
+        stepper.getBoundingClientRect().left -
+        4;
+    }
+  }, [state.step, state.view]);
+  if (!profileReady) {
+    return <main className="account-screen">Chargement de votre espace personnel…</main>;
+  }
+  if (profileLoadError) {
+    return (
+      <main className="account-screen">
+        <p className="error" role="alert">
+          Impossible de charger vos données : {profileLoadError}
+        </p>
+        <p>Vérifiez la configuration Supabase et les règles de sécurité de la base et du stockage.</p>
+      </main>
+    );
+  }
   const go = (step: number) =>
     update({ step, view: "wizard", maxStep: Math.max(state.maxStep, step) });
   const startAnalysis = async () => {
-    if (!cvFile) {
-      setApiError("Veuillez sélectionner à nouveau votre CV avant de lancer l’analyse.");
-      return;
-    }
     setApiError("");
-    update({ view: "loading", profileAnalysis: null, jobs: [], jobAnalysis: null });
+    update({
+      view: "loading",
+      profileAnalysis: null,
+      jobs: [],
+      jobAnalysis: null,
+      jobAnalyses: {},
+    });
     try {
       const profile = await analyzeProfile(cvFile, {
         currentJob: state.job,
@@ -190,13 +305,28 @@ export default function App() {
       setApiError("Relancez l’analyse de votre profil avant de choisir un métier.");
       return;
     }
+    if (jobLoading) return;
     setApiError("");
+    const cachedAnalysis = Object.hasOwn(state.jobAnalyses, name)
+      ? state.jobAnalyses[name]
+      : null;
+    if (cachedAnalysis) {
+      update({
+        selected: name,
+        jobAnalysis: cachedAnalysis,
+        step: 4,
+        maxStep: Math.max(state.maxStep, 4),
+        view: "wizard",
+      });
+      return;
+    }
     setJobLoading(true);
     update({ selected: name, jobAnalysis: null });
     try {
       const analysis = await analyzeJob(name, state.profileAnalysis);
       update({
         jobAnalysis: analysis,
+        jobAnalyses: { ...state.jobAnalyses, [name]: analysis },
         step: 4,
         maxStep: Math.max(state.maxStep, 4),
         view: "wizard",
@@ -209,18 +339,19 @@ export default function App() {
       setJobLoading(false);
     }
   };
-  useEffect(() => {
-    window.scrollTo({ top: 0, behavior: "instant" });
-    focusRef.current?.focus();
-    const activeStep = document.querySelector<HTMLElement>(".step.current");
-    const stepper = activeStep?.parentElement;
-    if (activeStep && stepper) {
-      stepper.scrollLeft +=
-        activeStep.getBoundingClientRect().left -
-        stepper.getBoundingClientRect().left -
-        4;
+  const restartProject = async () => {
+    try {
+      if (state.cvStoragePath) await deleteCv(state.cvStoragePath);
+      reset();
+      setRestart(false);
+    } catch (error) {
+      setApiError(
+        error instanceof Error
+          ? `Le CV enregistré n’a pas pu être supprimé : ${error.message}`
+          : "Le CV enregistré n’a pas pu être supprimé.",
+      );
     }
-  }, [state.step, state.view]);
+  };
   return (
     <>
       <header className="site-header">
@@ -261,6 +392,18 @@ export default function App() {
               ME
             </span>
             <button
+              className="text-link"
+              onClick={() => {
+                void signOut().catch((error: unknown) =>
+                  setApiError(
+                    error instanceof Error ? error.message : "La déconnexion a échoué.",
+                  ),
+                );
+              }}
+            >
+              Déconnexion
+            </button>
+            <button
               className="mobile-menu"
               onClick={() => setMobile(!mobile)}
               aria-label="Ouvrir la navigation"
@@ -285,14 +428,19 @@ export default function App() {
                   <Compass size={17} /> MON PARCOURS DE RECONVERSION
                 </span>
                 <span className="saved">
-                  <CheckCheck size={15} /> Progression sauvegardée
+                  <CheckCheck size={15} />
+                  {syncing ? "Enregistrement…" : "Progression sauvegardée"}
                 </span>
               </div>
               <nav className="stepper" aria-label="Étapes du parcours">
                 {steps.map((step, i) => (
                   <button
                     key={step}
-                    disabled={i > state.maxStep || state.view === "loading"}
+                    disabled={
+                      i > state.maxStep ||
+                      state.view === "loading" ||
+                      jobLoading
+                    }
                     className={`step ${i === state.step && state.view !== "dashboard" ? "current" : ""} ${i < state.step || state.view === "dashboard" ? "completed" : ""}`}
                     onClick={() => go(i)}
                     aria-current={i === state.step ? "step" : undefined}
@@ -314,14 +462,21 @@ export default function App() {
           <main
             ref={focusRef}
             tabIndex={-1}
-            className={`main-content ${state.view === "loading" ? "loading-main" : ""}`}
+            className={`main-content ${state.view === "loading" || jobLoading ? "loading-main" : ""}`}
           >
             {apiError && (
               <p className="error" role="alert">
                 {apiError}
               </p>
             )}
-            {state.view === "loading" ? (
+            {syncError && (
+              <p className="error" role="alert">
+                Vos modifications ne sont pas synchronisées : {syncError}
+              </p>
+            )}
+            {jobLoading ? (
+              <RoadmapLoading jobName={state.selected} />
+            ) : state.view === "loading" ? (
               <AnalysisLoading />
             ) : state.view === "dashboard" ? (
               state.jobAnalysis ? (
@@ -337,7 +492,12 @@ export default function App() {
                 </p>
               )
             ) : (
-              <div key={state.step} className="step-content enter">
+              <div
+                key={state.step}
+                className={`step-content enter ${
+                  state.step === 5 ? "roadmap-page" : ""
+                }`}
+              >
                 {state.step === 0 && <ProfileStep />}
                 {state.step === 1 && (
                   <>
@@ -843,7 +1003,7 @@ export default function App() {
           <span>Trouvez votre prochaine voie professionnelle.</span>
         </div>
         <p>
-          <ShieldCheck size={14} /> Votre CV est transmis au backend pour analyse
+          <ShieldCheck size={14} /> Votre CV est facultatif et transmis uniquement si vous le joignez
           <span className="footer-separator">·</span>
           <span>Pivot AI · 2026</span>
         </p>
@@ -859,9 +1019,10 @@ export default function App() {
             modifier vos réponses.
           </p>
           <p>
-            Votre CV est transmis au backend puis au workflow d’analyse n8n.
-            Seul son nom et les résultats sont conservés dans ce navigateur ;
-            le fichier lui-même n’est pas sauvegardé.
+            Vous pouvez joindre un CV (PDF ou DOCX) pour enrichir l’analyse, ou
+            continuer sans CV à partir des informations de votre profil. Le
+            fichier est transmis au backend puis au workflow d’analyse n8n ;
+            seul son nom et les résultats sont conservés dans ce navigateur.
           </p>
           <a
             className="text-link"
@@ -880,19 +1041,14 @@ export default function App() {
           close={() => setRestart(false)}
         >
           <p>
-            Vos réponses actuelles seront effacées sur cet appareil. Vous pouvez
-            télécharger votre rapport avant de recommencer.
+            Vos réponses, résultats et CV enregistrés seront supprimés de votre
+            espace. Vous pouvez télécharger votre rapport avant de recommencer.
           </p>
           <div className="modal-actions">
             <Button variant="outline" onClick={() => setRestart(false)}>
               Conserver mon projet
             </Button>
-            <Button
-              onClick={() => {
-                reset();
-                setRestart(false);
-              }}
-            >
+            <Button onClick={() => void restartProject()}>
               Recommencer
             </Button>
           </div>
@@ -1122,10 +1278,12 @@ function Landing({ start, resume }: { start: () => void; resume: boolean }) {
 
 function ProfileStep() {
   const { state, update, cvFile, setCvFile } = useVirage();
+  const { user } = useAccount();
   const [drag, setDrag] = useState(false);
   const [error, setError] = useState("");
+  const [uploading, setUploading] = useState(false);
   const input = useRef<HTMLInputElement>(null);
-  const acceptFile = (file?: File) => {
+  const acceptFile = async (file?: File) => {
     if (!file) return;
     if (!/\.(pdf|docx)$/i.test(file.name)) {
       setError("Choisissez un fichier PDF ou DOCX.");
@@ -1135,9 +1293,21 @@ function ProfileStep() {
       setError("Le fichier doit faire moins de 10 Mo.");
       return;
     }
+    setUploading(true);
     setError("");
-    setCvFile(file);
-    update({ cv: file.name });
+    try {
+      const path = await uploadCv(user.id, file);
+      setCvFile(file);
+      update({ cv: file.name, cvStoragePath: path });
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? `Le CV n’a pas pu être enregistré : ${caught.message}`
+          : "Le CV n’a pas pu être enregistré.",
+      );
+    } finally {
+      setUploading(false);
+    }
   };
   const drop = (e: DragEvent) => {
     e.preventDefault();
@@ -1145,7 +1315,7 @@ function ProfileStep() {
     acceptFile(e.dataTransfer.files[0]);
   };
   const valid = Boolean(
-    state.job.trim() && state.region && state.education && cvFile,
+    state.job.trim() && state.region && state.education && !uploading,
   );
   return (
     <>
@@ -1168,7 +1338,7 @@ function ProfileStep() {
             <span className="muted small">* Champs obligatoires</span>
           </div>
           <label className="field-label" htmlFor="cv">
-            Votre CV *
+            Votre CV <span className="muted small">(facultatif)</span>
           </label>
           <div
             className={`upload-zone ${drag ? "dragging" : ""} ${state.cv ? "has-file" : ""}`}
@@ -1184,7 +1354,7 @@ function ProfileStep() {
               id="cv"
               type="file"
               accept=".pdf,.docx"
-              required={!cvFile}
+              disabled={uploading}
               onChange={(e) => acceptFile(e.target.files?.[0])}
               className="sr-only"
             />
@@ -1195,20 +1365,34 @@ function ProfileStep() {
               <>
                 <strong className="file-name">{state.cv}</strong>
                 <span>
-                  {cvFile
-                    ? "Prêt pour l’analyse de votre profil"
-                    : "Fichier à sélectionner à nouveau pour l’analyse"}
+                  {uploading
+                    ? "Enregistrement sécurisé…"
+                    : cvFile
+                      ? "Enregistré dans votre espace privé"
+                      : "Récupération du CV enregistré…"}
                 </span>
                 <button
                   type="button"
                   className="text-link"
-                  onClick={() => {
-                    update({ cv: "" });
+                  onClick={async () => {
+                    if (state.cvStoragePath) {
+                      try {
+                        await deleteCv(state.cvStoragePath);
+                      } catch (caught) {
+                        setError(
+                          caught instanceof Error
+                            ? `Le CV n’a pas pu être supprimé : ${caught.message}`
+                            : "Le CV n’a pas pu être supprimé.",
+                        );
+                        return;
+                      }
+                    }
+                    update({ cv: "", cvStoragePath: "" });
                     setCvFile(null);
                     if (input.current) input.current.value = "";
                   }}
                 >
-                  Retirer le fichier
+                  Supprimer mon CV
                   <X size={13} />
                 </button>
               </>
@@ -1230,8 +1414,9 @@ function ProfileStep() {
             </p>
           )}
           <p className="upload-note">
-            <LockKeyhole size={12} /> Votre CV sera transmis au backend pour
-            analyse, puis envoyé au workflow sécurisé.
+            <LockKeyhole size={12} /> Sans CV, l’analyse s’appuie sur les
+            informations de votre profil. Si vous le joignez, il est conservé
+            dans votre espace privé jusqu’à sa suppression par vos soins.
           </p>
           <div className="form-fields">
             <div className="field full">
@@ -1347,8 +1532,8 @@ function ProfileStep() {
             <div>
               <strong>Votre confiance est essentielle</strong>
               <p>
-                Aucun compte nécessaire. Vos réponses sont sauvegardées
-                uniquement dans votre navigateur.
+                Vos réponses, résultats et CV sont associés à votre compte et
+                accessibles depuis vos appareils.
               </p>
             </div>
           </div>
@@ -1358,8 +1543,8 @@ function ProfileStep() {
         <span className="muted small">
           <Clock3 size={15} /> Environ 5 minutes pour explorer vos possibilités
         </span>
-        <Button form="profile-form" type="submit">
-          Continuer
+        <Button form="profile-form" type="submit" disabled={uploading}>
+          {uploading ? "Enregistrement du CV…" : "Continuer"}
           <ArrowRight size={17} />
         </Button>
       </div>
@@ -1454,12 +1639,12 @@ function AnalysisLoading() {
   const [progress, setProgress] = useState(0);
   useEffect(() => {
     const timer = window.setInterval(
-      () => setProgress((p) => Math.min(90, p + 1)),
-      120,
+      () => setProgress((p) => Math.min(95, p + (95 - p) * 0.025)),
+      500,
     );
     return () => clearInterval(timer);
   }, []);
-  const index = Math.min(7, Math.floor(progress / 12.6));
+  const index = Math.min(7, Math.floor(progress / 12));
   return (
     <Card className="loading-card">
       <div className="loading-orbit">
@@ -1473,7 +1658,7 @@ function AnalysisLoading() {
       <p>Nous préparons vos recommandations personnalisées.</p>
       <div className="loading-status" role="status" aria-live="polite">
         <span>{loadingMessages[index]}</span>
-        <strong>{progress}%</strong>
+        <strong>{Math.round(progress)}%</strong>
       </div>
       <Progress value={progress} label="Progression de l’analyse" />
       <div className="loading-checks">
@@ -1493,9 +1678,117 @@ function AnalysisLoading() {
     </Card>
   );
 }
-function CourseCard({ course }: { course: Training }) {
+function RoadmapLoading({ jobName }: { jobName: string }) {
+  const [progress, setProgress] = useState(8);
+  useEffect(() => {
+    const timer = window.setInterval(
+      () =>
+        setProgress((value) =>
+          Math.min(92, value + Math.max(0.7, (92 - value) * 0.035)),
+        ),
+      500,
+    );
+    return () => window.clearInterval(timer);
+  }, []);
+  const phases = [
+    "Analyse du métier et de ses besoins",
+    "Repérage des compétences à acquérir",
+    "Organisation des étapes de progression",
+    "Préparation de votre feuille de route",
+  ];
+  const activePhase = Math.min(phases.length - 1, Math.floor(progress / 24));
   return (
-    <Card className="course-card">
+    <Card className="roadmap-loading-card">
+      <div className="roadmap-loading-heading">
+        <span className="roadmap-loading-mark">
+          <Route size={21} aria-hidden="true" />
+        </span>
+        <div>
+          <Badge>VOTRE FEUILLE DE ROUTE</Badge>
+          <h1>Votre parcours prend forme</h1>
+          <p>
+            Nous préparons les étapes clés pour vous guider vers{" "}
+            <strong>{jobName}</strong>.
+          </p>
+        </div>
+      </div>
+      <div className="roadmap-loading-progress">
+        <div className="roadmap-loading-progress-label">
+          <span>Génération du parcours</span>
+          <strong>{Math.round(progress)}%</strong>
+        </div>
+        <Progress
+          value={progress}
+          label="Progression de la génération du parcours"
+        />
+      </div>
+      <ol className="roadmap-loading-steps">
+        {phases.map((phase, index) => (
+          <li
+            className={
+              index < activePhase
+                ? "complete"
+                : index === activePhase
+                  ? "active"
+                  : ""
+            }
+            key={phase}
+          >
+            <span className="roadmap-loading-node">
+              {index < activePhase ? <Check size={13} /> : index + 1}
+            </span>
+            <span>{phase}</span>
+            {index === activePhase && (
+              <span className="roadmap-loading-dots" aria-hidden="true">
+                <i />
+                <i />
+                <i />
+              </span>
+            )}
+          </li>
+        ))}
+      </ol>
+      <div className="roadmap-loading-status" role="status" aria-live="polite">
+        Étape {activePhase + 1} sur {phases.length} · Votre parcours se
+        construit
+      </div>
+    </Card>
+  );
+}
+function CourseCard({ course }: { course: Training }) {
+  const providedUrl = course.url?.trim();
+  const candidateUrl = providedUrl
+    ? /^[a-z][a-z\d+.-]*:/i.test(providedUrl)
+      ? providedUrl
+      : `https://${providedUrl}`
+    : "";
+  let destination = "";
+  try {
+    const parsedUrl = new URL(candidateUrl);
+    if (parsedUrl.protocol === "http:" || parsedUrl.protocol === "https:") {
+      destination = parsedUrl.href;
+    }
+  } catch {
+    // Ignore malformed workflow URLs and use a known provider homepage if available.
+  }
+  const providerName = course.organization
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase("fr");
+  const knownProviders: [string, string][] = [
+    ["afpa", "https://www.afpa.fr/"],
+    ["openclassrooms", "https://openclassrooms.com/"],
+    ["cnam", "https://www.cnam.fr/"],
+  ];
+  const knownProvider = knownProviders.find(([name]) =>
+    providerName.includes(name),
+  );
+  if (!destination) {
+    destination = knownProvider?.[1] ?? "";
+  }
+
+  const content = (
+    <>
       <div className="course-provider">
         <span className="provider-logo purple">
           {course.organization.slice(0, 3).toUpperCase()}
@@ -1514,15 +1807,28 @@ function CourseCard({ course }: { course: Training }) {
           {course.level}
         </span>
       </div>
-      {course.url && (
-        <Button asChild variant="outline">
-          <a href={course.url} target="_blank" rel="noreferrer">
-            Consulter
-            <ExternalLink size={15} />
-          </a>
-        </Button>
-      )}
-    </Card>
+    </>
+  );
+  if (!destination) {
+    return (
+      <Card className="course-card">
+        {content}
+        <span className="course-link-unavailable">
+          Lien direct vers le centre indisponible
+        </span>
+      </Card>
+    );
+  }
+  return (
+    <a
+      className="card course-card course-card-link"
+      href={destination}
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label={`Ouvrir le site de ${course.organization} pour la formation ${course.title}`}
+    >
+      {content}
+    </a>
   );
 }
 
@@ -1595,6 +1901,7 @@ function Dashboard({
 }) {
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState("");
+  const preferences = state.profileAnalysis?.preferences;
   return (
     <div className="enter">
       <Heading
@@ -1637,7 +1944,7 @@ function Dashboard({
             </div>
             <div>
               <dt>Région</dt>
-              <dd>{state.region}</dd>
+              <dd>{state.profileAnalysis?.region || state.region}</dd>
             </div>
             <div>
               <dt>Niveau d’études</dt>
@@ -1662,10 +1969,54 @@ function Dashboard({
             </button>
           </div>
           <div className="job-tags">
-            {state.interests.map((i) => (
+            {(state.profileAnalysis?.hobbies ?? state.interests).map((i) => (
               <Badge key={i}>{i}</Badge>
             ))}
           </div>
+          <div className="section-title">
+            <h3>Environnement de travail souhaité</h3>
+            <button className="text-link" onClick={() => edit(2)}>
+              Modifier
+            </button>
+          </div>
+          <dl className="profile-summary">
+            <div>
+              <dt>Mode de collaboration</dt>
+              <dd>
+                {preferences?.team ?? state.team}% équipe ·{" "}
+                {100 - (preferences?.team ?? state.team)}% individuel
+              </dd>
+            </div>
+            <div>
+              <dt>Lieu de travail</dt>
+              <dd>
+                {preferences?.office ?? state.office}% bureau ·{" "}
+                {100 - (preferences?.office ?? state.office)}% terrain
+              </dd>
+            </div>
+            <div>
+              <dt>Orientation technique</dt>
+              <dd>{preferences?.technical ?? state.technical}%</dd>
+            </div>
+            <div>
+              <dt>Orientation relationnelle</dt>
+              <dd>{preferences?.relational ?? state.relational}%</dd>
+            </div>
+            <div>
+              <dt>Management d’équipe</dt>
+              <dd>
+                {(preferences?.management ?? state.management) ? "Oui" : "Non"}
+              </dd>
+            </div>
+            <div>
+              <dt>Déplacements fréquents</dt>
+              <dd>{(preferences?.travel ?? state.travel) ? "Oui" : "Non"}</dd>
+            </div>
+            <div>
+              <dt>Autonomie importante</dt>
+              <dd>{(preferences?.autonomy ?? state.autonomy) ? "Oui" : "Non"}</dd>
+            </div>
+          </dl>
         </Card>
         <Card className="form-card">
           <h2>
