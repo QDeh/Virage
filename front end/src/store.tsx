@@ -1,6 +1,7 @@
 import {
   createContext,
   useContext,
+  useCallback,
   useEffect,
   useState,
   type ReactNode,
@@ -16,6 +17,7 @@ export type Profile = {
   education: string;
   remote: string;
   cv: string;
+  cvStoragePath: string;
   interests: string[];
   team: number;
   office: number;
@@ -38,6 +40,7 @@ export const initial: Profile = {
   education: "",
   remote: "Sans importance",
   cv: "",
+  cvStoragePath: "",
   interests: [],
   team: 65,
   office: 70,
@@ -57,49 +60,39 @@ export const initial: Profile = {
 const Context = createContext<{
   state: Profile;
   update: (data: Partial<Profile>) => void;
+  replace: (profile: Profile) => void;
   cvFile: File | null;
   setCvFile: (file: File | null) => void;
   reset: () => void;
 } | null>(null);
 export function Provider({ children }: { children: ReactNode }) {
-  const [cvFile, setCvFile] = useState<File | null>(null);
-  const [state, setState] = useState<Profile>(() => {
-    try {
-      const saved = JSON.parse(
-        localStorage.getItem("virage-profile") || "null",
-      );
-      if (!saved) return initial;
-      const restored = { ...initial, ...saved };
-      if (!Array.isArray(saved.jobs) && saved.step >= 3) {
-        restored.step = 2;
-        restored.maxStep = Math.min(saved.maxStep ?? 0, 2);
-        restored.selected = "";
-        restored.view = "wizard";
-      }
-      if (saved.view === "loading") restored.view = "wizard";
-      return restored;
-    } catch {
-      return initial;
-    }
-  });
   useEffect(() => {
     try {
-      localStorage.setItem("virage-profile", JSON.stringify(state));
+      localStorage.removeItem("virage-profile");
     } catch {
-      /* Private browsing can disable storage. */
+      // Old local-only profile data is optional to clear.
     }
-  }, [state]);
+  }, []);
+  const [cvFile, setCvFile] = useState<File | null>(null);
+  const [state, setState] = useState<Profile>(initial);
+  const update = useCallback(
+    (data: Partial<Profile>) => setState((current) => ({ ...current, ...data })),
+    [],
+  );
+  const replace = useCallback((profile: Profile) => setState(profile), []);
+  const reset = useCallback(() => {
+    setCvFile(null);
+    setState({ ...initial, view: "wizard" });
+  }, []);
   return (
     <Context.Provider
       value={{
         state,
-        update: (data) => setState((s) => ({ ...s, ...data })),
+        update,
+        replace,
         cvFile,
         setCvFile,
-        reset: () => {
-          setCvFile(null);
-          setState({ ...initial, view: "wizard" });
-        },
+        reset,
       }}
     >
       {children}

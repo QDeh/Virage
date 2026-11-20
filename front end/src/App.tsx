@@ -43,10 +43,18 @@ import {
 } from "lucide-react";
 import { Badge, Button, Card, Progress } from "./components/ui";
 import { interests, steps } from "./data";
-import { useVirage } from "./store";
+import { initial, useVirage } from "./store";
 import type { Profile } from "./store";
 import { analyzeJob, analyzeProfile, matchJobs } from "./api";
 import type { Training } from "./api";
+import { useAccount } from "./account";
+import {
+  deleteCv,
+  downloadCv,
+  loadProfile,
+  saveProfile,
+  uploadCv,
+} from "./persistence";
 
 type SelectedJob = {
   id: string;
@@ -107,7 +115,12 @@ function Heading({
   );
 }
 export default function App() {
-  const { state, update, reset, cvFile } = useVirage();
+  const { state, update, replace, reset, cvFile, setCvFile } = useVirage();
+  const { user, signOut } = useAccount();
+  const [profileReady, setProfileReady] = useState(false);
+  const [profileLoadError, setProfileLoadError] = useState("");
+  const [syncError, setSyncError] = useState("");
+  const [syncing, setSyncing] = useState(false);
   const [help, setHelp] = useState(false);
   const [restart, setRestart] = useState(false);
   const [mobile, setMobile] = useState(false);
@@ -142,6 +155,98 @@ export default function App() {
         roadmap: [],
         trainings: [],
       };
+  useEffect(() => {
+    let active = true;
+    setProfileReady(false);
+    setProfileLoadError("");
+    setSyncError("");
+    const restore = async () => {
+      try {
+        const saved = await loadProfile(user.id);
+        const profile = saved?.app_state
+          ? { ...initial, ...saved.app_state }
+          : { ...initial };
+        if (profile.view === "loading") profile.view = "wizard";
+        if (saved?.cv_path) {
+          const blob = await downloadCv(saved.cv_path);
+          profile.cvStoragePath = saved.cv_path;
+          if (active) {
+            setCvFile(
+              new File([blob], profile.cv || "cv.pdf", {
+                type: blob.type || "application/pdf",
+              }),
+            );
+          }
+        } else if (active) {
+          setCvFile(null);
+          profile.cvStoragePath = "";
+        }
+        if (active) {
+          replace(profile);
+          setProfileReady(true);
+        }
+      } catch (error) {
+        if (active) {
+          setProfileLoadError(
+            error instanceof Error
+              ? error.message
+              : "Impossible de charger votre espace personnel.",
+          );
+          setProfileReady(true);
+        }
+      }
+    };
+    void restore();
+    return () => {
+      active = false;
+    };
+  }, [user.id, replace, setCvFile]);
+  useEffect(() => {
+    if (!profileReady || profileLoadError) return;
+    setSyncing(true);
+    const timeout = window.setTimeout(() => {
+      void saveProfile(user.id, state).then(
+        () => {
+          setSyncError("");
+          setSyncing(false);
+        },
+        (error: unknown) => {
+          setSyncError(
+            error instanceof Error
+              ? error.message
+              : "La sauvegarde de votre espace a échoué.",
+          );
+          setSyncing(false);
+        },
+      );
+    }, 500);
+    return () => window.clearTimeout(timeout);
+  }, [profileReady, profileLoadError, state, user.id]);
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "instant" });
+    focusRef.current?.focus();
+    const activeStep = document.querySelector<HTMLElement>(".step.current");
+    const stepper = activeStep?.parentElement;
+    if (activeStep && stepper) {
+      stepper.scrollLeft +=
+        activeStep.getBoundingClientRect().left -
+        stepper.getBoundingClientRect().left -
+        4;
+    }
+  }, [state.step, state.view]);
+  if (!profileReady) {
+    return <main className="account-screen">Chargement de votre espace personnel…</main>;
+  }
+  if (profileLoadError) {
+    return (
+      <main className="account-screen">
+        <p className="error" role="alert">
+          Impossible de charger vos données : {profileLoadError}
+        </p>
+        <p>Vérifiez la configuration Supabase et les règles de sécurité de la base et du stockage.</p>
+      </main>
+    );
+  }
   const go = (step: number) =>
     update({ step, view: "wizard", maxStep: Math.max(state.maxStep, step) });
   const startAnalysis = async () => {
@@ -205,18 +310,19 @@ export default function App() {
       setJobLoading(false);
     }
   };
-  useEffect(() => {
-    window.scrollTo({ top: 0, behavior: "instant" });
-    focusRef.current?.focus();
-    const activeStep = document.querySelector<HTMLElement>(".step.current");
-    const stepper = activeStep?.parentElement;
-    if (activeStep && stepper) {
-      stepper.scrollLeft +=
-        activeStep.getBoundingClientRect().left -
-        stepper.getBoundingClientRect().left -
-        4;
+  const restartProject = async () => {
+    try {
+      if (state.cvStoragePath) await deleteCv(state.cvStoragePath);
+      reset();
+      setRestart(false);
+    } catch (error) {
+      setApiError(
+        error instanceof Error
+          ? `Le CV enregistré n’a pas pu être supprimé : ${error.message}`
+          : "Le CV enregistré n’a pas pu être supprimé.",
+      );
     }
-  }, [state.step, state.view]);
+  };
   return (
     <>
       <header className="site-header">
@@ -257,6 +363,18 @@ export default function App() {
               ME
             </span>
             <button
+              className="text-link"
+              onClick={() => {
+                void signOut().catch((error: unknown) =>
+                  setApiError(
+                    error instanceof Error ? error.message : "La déconnexion a échoué.",
+                  ),
+                );
+              }}
+            >
+              Déconnexion
+            </button>
+            <button
               className="mobile-menu"
               onClick={() => setMobile(!mobile)}
               aria-label="Ouvrir la navigation"
@@ -281,7 +399,8 @@ export default function App() {
                   <Compass size={17} /> MON PARCOURS DE RECONVERSION
                 </span>
                 <span className="saved">
-                  <CheckCheck size={15} /> Progression sauvegardée
+                  <CheckCheck size={15} />
+                  {syncing ? "Enregistrement…" : "Progression sauvegardée"}
                 </span>
               </div>
               <nav className="stepper" aria-label="Étapes du parcours">
@@ -315,6 +434,11 @@ export default function App() {
             {apiError && (
               <p className="error" role="alert">
                 {apiError}
+              </p>
+            )}
+            {syncError && (
+              <p className="error" role="alert">
+                Vos modifications ne sont pas synchronisées : {syncError}
               </p>
             )}
             {state.view === "loading" ? (
@@ -877,19 +1001,14 @@ export default function App() {
           close={() => setRestart(false)}
         >
           <p>
-            Vos réponses actuelles seront effacées sur cet appareil. Vous pouvez
-            télécharger votre rapport avant de recommencer.
+            Vos réponses, résultats et CV enregistrés seront supprimés de votre
+            espace. Vous pouvez télécharger votre rapport avant de recommencer.
           </p>
           <div className="modal-actions">
             <Button variant="outline" onClick={() => setRestart(false)}>
               Conserver mon projet
             </Button>
-            <Button
-              onClick={() => {
-                reset();
-                setRestart(false);
-              }}
-            >
+            <Button onClick={() => void restartProject()}>
               Recommencer
             </Button>
           </div>
@@ -1119,10 +1238,12 @@ function Landing({ start, resume }: { start: () => void; resume: boolean }) {
 
 function ProfileStep() {
   const { state, update, cvFile, setCvFile } = useVirage();
+  const { user } = useAccount();
   const [drag, setDrag] = useState(false);
   const [error, setError] = useState("");
+  const [uploading, setUploading] = useState(false);
   const input = useRef<HTMLInputElement>(null);
-  const acceptFile = (file?: File) => {
+  const acceptFile = async (file?: File) => {
     if (!file) return;
     if (!/\.(pdf|docx)$/i.test(file.name)) {
       setError("Choisissez un fichier PDF ou DOCX.");
@@ -1132,9 +1253,21 @@ function ProfileStep() {
       setError("Le fichier doit faire moins de 10 Mo.");
       return;
     }
+    setUploading(true);
     setError("");
-    setCvFile(file);
-    update({ cv: file.name });
+    try {
+      const path = await uploadCv(user.id, file);
+      setCvFile(file);
+      update({ cv: file.name, cvStoragePath: path });
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? `Le CV n’a pas pu être enregistré : ${caught.message}`
+          : "Le CV n’a pas pu être enregistré.",
+      );
+    } finally {
+      setUploading(false);
+    }
   };
   const drop = (e: DragEvent) => {
     e.preventDefault();
@@ -1142,7 +1275,7 @@ function ProfileStep() {
     acceptFile(e.dataTransfer.files[0]);
   };
   const valid = Boolean(
-    state.job.trim() && state.region && state.education,
+    state.job.trim() && state.region && state.education && !uploading,
   );
   return (
     <>
@@ -1181,6 +1314,7 @@ function ProfileStep() {
               id="cv"
               type="file"
               accept=".pdf,.docx"
+              disabled={uploading}
               onChange={(e) => acceptFile(e.target.files?.[0])}
               className="sr-only"
             />
@@ -1191,20 +1325,34 @@ function ProfileStep() {
               <>
                 <strong className="file-name">{state.cv}</strong>
                 <span>
-                  {cvFile
-                    ? "Prêt pour l’analyse de votre profil"
-                    : "Fichier à sélectionner à nouveau pour l’analyse"}
+                  {uploading
+                    ? "Enregistrement sécurisé…"
+                    : cvFile
+                      ? "Enregistré dans votre espace privé"
+                      : "Récupération du CV enregistré…"}
                 </span>
                 <button
                   type="button"
                   className="text-link"
-                  onClick={() => {
-                    update({ cv: "" });
+                  onClick={async () => {
+                    if (state.cvStoragePath) {
+                      try {
+                        await deleteCv(state.cvStoragePath);
+                      } catch (caught) {
+                        setError(
+                          caught instanceof Error
+                            ? `Le CV n’a pas pu être supprimé : ${caught.message}`
+                            : "Le CV n’a pas pu être supprimé.",
+                        );
+                        return;
+                      }
+                    }
+                    update({ cv: "", cvStoragePath: "" });
                     setCvFile(null);
                     if (input.current) input.current.value = "";
                   }}
                 >
-                  Retirer le fichier
+                  Supprimer mon CV
                   <X size={13} />
                 </button>
               </>
@@ -1227,8 +1375,8 @@ function ProfileStep() {
           )}
           <p className="upload-note">
             <LockKeyhole size={12} /> Sans CV, l’analyse s’appuie sur les
-            informations de votre profil. Votre CV n’est transmis que si vous
-            choisissez de le joindre.
+            informations de votre profil. Si vous le joignez, il est conservé
+            dans votre espace privé jusqu’à sa suppression par vos soins.
           </p>
           <div className="form-fields">
             <div className="field full">
@@ -1344,8 +1492,8 @@ function ProfileStep() {
             <div>
               <strong>Votre confiance est essentielle</strong>
               <p>
-                Aucun compte nécessaire. Vos réponses sont sauvegardées
-                uniquement dans votre navigateur.
+                Vos réponses, résultats et CV sont associés à votre compte et
+                accessibles depuis vos appareils.
               </p>
             </div>
           </div>
@@ -1355,8 +1503,8 @@ function ProfileStep() {
         <span className="muted small">
           <Clock3 size={15} /> Environ 5 minutes pour explorer vos possibilités
         </span>
-        <Button form="profile-form" type="submit">
-          Continuer
+        <Button form="profile-form" type="submit" disabled={uploading}>
+          {uploading ? "Enregistrement du CV…" : "Continuer"}
           <ArrowRight size={17} />
         </Button>
       </div>

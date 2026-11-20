@@ -1,0 +1,420 @@
+{
+  "name": "Virage/analyse-profil",
+  "nodes": [
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1872,
+        0
+      ],
+      "id": "fddbe079-9969-4e56-ad46-0ca02067b1b4",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "virage/profile-analysis",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.2,
+      "position": [
+        0,
+        0
+      ],
+      "id": "d5a510ea-72d1-4ae8-91ec-157fa04205c0",
+      "name": "Webhook",
+      "webhookId": "2faafcd2-671d-43ed-b534-d59cc4854a9b"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "5d9528f7-bd77-45eb-8795-5f903af68f08",
+              "leftValue": "={{ $json.body.cvBase64 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        224,
+        0
+      ],
+      "id": "cf43fb46-cc43-4822-a23c-5f76cc725ebe",
+      "name": "CV fourni ?"
+    },
+    {
+      "parameters": {
+        "operation": "toBinary",
+        "sourceProperty": "cvBase64",
+        "options": {
+          "fileName": "={{$node[\"Webhook\"].json.body.cvFileName}}",
+          "mimeType": "={{$node[\"Webhook\"].json.body.cvContentType}}"
+        }
+      },
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.2,
+      "position": [
+        448,
+        0
+      ],
+      "id": "110e2074-4093-4860-98f4-5c873f2a55d3",
+      "name": "Convert to File"
+    },
+    {
+      "parameters": {
+        "operation": "pdf",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.2,
+      "position": [
+        672,
+        0
+      ],
+      "id": "bdaa31b3-8dac-4f57-94e6-459077346e4c",
+      "name": "Extract from File"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const item = $input.first().json;\nconst cvText = typeof item.cvText === 'string' ? item.cvText.trim() : '';\n\nif (typeof item.currentJob !== 'string' || !item.currentJob.trim()) {\n  throw new Error('Le métier actuel ou le dernier métier exercé est obligatoire.');\n}\nif (typeof item.region !== 'string' || !item.region.trim()) {\n  throw new Error('La région recherchée est obligatoire.');\n}\n\nreturn [{ json: { ...item, cvText } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1104,
+        0
+      ],
+      "id": "53cfb494-8cea-4971-8c28-a9221c014839",
+      "name": "Validate extracted CV text"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-6-luna",
+          "mode": "list",
+          "cachedResultName": "GPT-6-LUNA"
+        },
+        "responses": {
+          "values": [
+            {
+              "role": "system",
+              "content": "Tu es un recruteur expert et analyste RH.\n\nAnalyse les informations disponibles : le texte du CV s’il est fourni, ainsi que le métier actuel ou dernier métier exercé, la région, les centres d’intérêt et les préférences.\n\nRègles :\n- Ne jamais inventer une expérience, une formation ou une compétence.\n- Si un CV est fourni, extrais les compétences et le parcours réellement mentionnés.\n- Si aucun CV n’est fourni, fonde le résumé sur le métier déclaré, les centres d’intérêt et les préférences; indique clairement que l’analyse est basée sur ces informations.\n- Sans CV, ne déduis pas de compétences techniques ou d’expériences précises à partir du seul intitulé du métier. Tu peux proposer des compétences transférables seulement si elles sont directement étayées par les informations fournies.\n- Si une catégorie n’est pas étayée par les informations disponibles, retourne un tableau vide pour cette catégorie.\n- Les préférences servent à personnaliser les pistes, pas à prouver une compétence ou une expérience.\n- Réponds en français avec exactement les quatre propriétés demandées, au format JSON valide, sans texte avant ou après."
+            },
+            {
+              "content": "=Métier actuel :\n{{ $json.currentJob }}\n\nRégion :\n{{ $json.region }}\n\nCentres d'intérêt :\n{{ $json.hobbies }}\n\nPréférences :\n{{ $json.preferences }}\n\nCV :\n{{ $json.cvText ? 'Texte extrait du CV :\\n' + $json.cvText : 'Aucun CV fourni.' }}\n\nRetourne exactement un objet JSON de cette forme, en remplaçant les exemples par les informations étayées par les données ci-dessus :\n{\n  \"technicalSkills\": [],\n  \"softSkills\": [],\n  \"transferableSkills\": [],\n  \"profileSummary\": \"Résumé du profil en français.\"\n}"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.3,
+      "position": [
+        1328,
+        0
+      ],
+      "id": "489e7986-8f4f-4964-8876-1ad7a39bd3d6",
+      "name": "Message a model",
+      "executeOnce": false,
+      "alwaysOutputData": false,
+      "credentials": {
+        "openAiApi": {
+          "id": "328YzARORptdX5di",
+          "name": "OpenAI account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const result = $input.first().json;\nconst requestBody = $('Webhook').first().json.body;\nconst message = Array.isArray(result.output)\n  ? result.output.find((entry) => entry.type === 'message')\n  : undefined;\nconst text = message?.content?.find((entry) => entry.type === 'output_text')?.text\n  ?? result.text;\n\nif (typeof text !== 'string' || !text.trim()) {\n  throw new Error('Le nœud OpenAI n’a pas renvoyé de texte JSON.');\n}\n\nconst jsonText = text.trim().replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```$/, '');\nlet profile;\ntry {\n  profile = JSON.parse(jsonText);\n} catch (error) {\n  throw new Error(`La réponse du modèle n’est pas un JSON valide : ${error.message}`);\n}\n\nif (\n  !Array.isArray(profile.technicalSkills)\n  || !Array.isArray(profile.softSkills)\n  || !Array.isArray(profile.transferableSkills)\n  || typeof profile.profileSummary !== 'string'\n) {\n  throw new Error('La réponse JSON du modèle ne respecte pas le format ProfileAnalysisResponse attendu.');\n}\n\nreturn [{\n  json: {\n    technicalSkills: profile.technicalSkills,\n    softSkills: profile.softSkills,\n    transferableSkills: profile.transferableSkills,\n    profileSummary: profile.profileSummary,\n    region: requestBody.region ?? '',\n    hobbies: Array.isArray(requestBody.hobbies) ? requestBody.hobbies : [],\n  },\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1648,
+        0
+      ],
+      "id": "2975a984-93f5-4ba0-b08e-6583299c2a57",
+      "name": "Parse profile JSON"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const profile = $input.first().json;\nconst preferences = $('Webhook').first().json.body.preferences;\nreturn [{ json: { ...profile, preferences: preferences ?? {} } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        0
+      ],
+      "id": "49e29423-5b58-47b6-a141-6114dc1f09a6",
+      "name": "Add submitted preferences"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a349fa8b-c9e0-4a61-a6bf-a1d0c479212b",
+              "name": "cvText",
+              "value": "={{$json.text}}",
+              "type": "string"
+            },
+            {
+              "id": "d31c1de3-eece-4ded-b341-eb457372dcd5",
+              "name": "currentJob",
+              "value": "={{$node[\"Webhook\"].json.body.currentJob}}",
+              "type": "string"
+            },
+            {
+              "id": "b857e55b-84df-4323-8b13-15da48428c36",
+              "name": "region",
+              "value": "={{$node[\"Webhook\"].json.body.region}}",
+              "type": "string"
+            },
+            {
+              "id": "5bfa13b1-3c02-4c62-b327-8e74a0c3d921",
+              "name": "hobbies",
+              "value": "={{JSON.stringify($node[\"Webhook\"].json.body.hobbies ?? [])}}",
+              "type": "string"
+            },
+            {
+              "id": "3dac00ab-1be8-4818-8685-1c8e92671299",
+              "name": "preferences",
+              "value": "={{JSON.stringify($node[\"Webhook\"].json.body.preferences ?? {})}}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        896,
+        0
+      ],
+      "id": "a088f2b1-a10b-4f6d-b364-33ec1fb54a37",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "8107d56f-7d9b-4669-8e56-d750c49a51e2",
+              "name": "cvBase64",
+              "value": "={{$json.body.cvBase64}}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        224,
+        0
+      ],
+      "id": "4dd2a5d8-664d-4e2f-8d24-51c0621bf80c",
+      "name": "Edit Fields1"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a3957f09-7ea0-4d38-a0c0-983d02bc555a",
+              "name": "text",
+              "value": "",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        448,
+        224
+      ],
+      "id": "0ecb9244-d6eb-416e-92f6-fd073b07c87f",
+      "name": "No CV"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "CV fourni ?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CV fourni ?": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No CV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convert to File": {
+      "main": [
+        [
+          {
+            "node": "Extract from File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "No CV": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Validate extracted CV text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate extracted CV text": {
+      "main": [
+        [
+          {
+            "node": "Message a model",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Message a model": {
+      "main": [
+        [
+          {
+            "node": "Parse profile JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse profile JSON": {
+      "main": [
+        [
+          {
+            "node": "Add submitted preferences",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Add submitted preferences": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields1": {
+      "main": [
+        [
+          {
+            "node": "Convert to File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "cac24a78-146c-4105-8971-b58c6031119e",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "2e00a4319cadc549cfb110a203e802bab35785876ab781b49ee4983d1dde83c9"
+  },
+  "nodeGroups": [],
+  "id": "x8dSlIHQdnqovlBJ",
+  "tags": []
+}

@@ -264,6 +264,71 @@ main:focus {
 }
 .eyebrow {
   display: block;
+}
+.account-screen {
+  min-height: 100vh;
+  padding: 32px 16px;
+  display: grid;
+  place-items: center;
+  background:
+    radial-gradient(ellipse at 20% 10%, #dbeafe 0, transparent 44%),
+    #f8fafc;
+}
+.account-card {
+  width: min(100%, 460px);
+  padding: 36px;
+  display: grid;
+  gap: 18px;
+}
+.account-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 28px;
+  letter-spacing: -1.4px;
+}
+.account-brand .brand-icon {
+  display: grid;
+  place-items: center;
+  color: white;
+  border-radius: 12px;
+}
+.account-brand .brand-dot {
+  color: #2563eb;
+}
+.account-card > h1 {
+  font-size: 28px;
+}
+.account-form {
+  display: grid;
+  gap: 10px;
+}
+.account-form label {
+  margin-top: 8px;
+  font-weight: 600;
+}
+.account-form input {
+  min-height: 44px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #d5deeb;
+  border-radius: 9px;
+  background: white;
+}
+.account-form .btn {
+  margin-top: 12px;
+}
+.account-toggle {
+  justify-self: start;
+  text-align: left;
+}
+.account-message {
+  color: #166534;
+}
+@media (max-width: 560px) {
+  .account-card {
+    padding: 26px 20px;
+  }
   color: #5075ac;
   font-size: 10px;
   letter-spacing: 1.5px;
