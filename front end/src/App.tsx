@@ -1005,7 +1005,7 @@ export default function App() {
         <p>
           <ShieldCheck size={14} /> Votre CV est facultatif et transmis uniquement si vous le joignez
           <span className="footer-separator">·</span>
-          <span>Pivot AI · 2026</span>
+          <span>Virage · 2026</span>
         </p>
       </footer>
       {help && (
@@ -1855,7 +1855,7 @@ async function downloadReport(state: Profile, job: SelectedJob) {
   doc.setTextColor(37, 99, 235);
   text("virage. — Votre projet professionnel", 23);
   doc.setTextColor(55, 65, 81);
-  text(`Rapport Pivot AI · ${new Date().toLocaleDateString("fr-FR")}`);
+  text(`Rapport Virage · ${new Date().toLocaleDateString("fr-FR")}`);
   text("PROFIL", 14);
   text(`${state.job} | ${state.region} | ${state.education}`);
   text(`Teletravail : ${state.remote} | CV : ${state.cv || "Non fourni"}`);

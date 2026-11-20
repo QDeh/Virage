@@ -8,7 +8,7 @@ export default defineConfig({
   server: {
     proxy: {
       "/api": {
-        target: process.env.PIVOT_API_PROXY_TARGET ?? "http://localhost:8080",
+        target: process.env.VIRAGE_API_PROXY_TARGET ?? "http://localhost:8080",
         changeOrigin: true,
       },
     },
