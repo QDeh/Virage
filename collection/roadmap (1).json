@@ -1,0 +1,392 @@
+{
+  "name": "roadmap",
+  "nodes": [
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-6-luna",
+          "mode": "list",
+          "cachedResultName": "GPT-6-LUNA"
+        },
+        "responses": {
+          "values": [
+            {
+              "role": "system",
+              "content": "Tu es un expert en recrutement et en ingénierie de formation professionnelle.\n\nTa mission est de comparer les compétences d'un candidat avec les compétences attendues pour le métier qu'il vise.\n\nRÈGLES D'ANALYSE :\n\n1. Compare les compétences techniques, comportementales et transférables du candidat avec les compétences attendues.\n2. Identifie les compétences attendues déjà maîtrisées.\n3. Identifie les compétences attendues qui ne sont pas maîtrisées et qui peuvent être acquises ou développées grâce à une formation professionnelle.\n4. Reconnais les équivalences sémantiques réelles.\n5. Une compétence générale peut couvrir une compétence technique uniquement si elle démontre réellement sa maîtrise.\n6. Ne considère pas une compétence comme acquise simplement parce qu'elle est vaguement liée à une autre.\n7. Ne crée aucune compétence qui ne figure pas dans expectedSkills.\n8. Conserve exactement les formulations des compétences attendues.\n\nFORMAT DE SORTIE :\n\nRetourne exclusivement un JSON valide, sans Markdown ni commentaire.\n\n{\n  \"acquiredSkills\": [],\n  \"missingSkills\": [],\n  \"analysis\": \"\"\n}\n\nLes compétences manquantes doivent être des savoir-faire concrets pouvant faire l'objet d'une formation professionnelle."
+            },
+            {
+              "content": "={{ $json.toJsonString() }}"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.3,
+      "position": [
+        256,
+        176
+      ],
+      "id": "57e02fef-0865-4e04-933b-18ce0741147a",
+      "name": "IA - Analyses des compétences",
+      "credentials": {
+        "openAiApi": {
+          "id": "N1Rx437bdRXtuP70",
+          "name": "OpenAI account 9"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://api.francetravail.io/partenaire/rome-fiches-metiers/v1/fiches-rome/fiche-metier/{{$json.body.targetJob.romeCode}}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        112,
+        -176
+      ],
+      "id": "e2801c42-0ca1-4ff9-81e7-b76f4d58bd6b",
+      "name": "Récupérer compétences métier",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Récupération des données du Webhook\nconst webhook = $('roadmap').first().json;\n\n// Récupération de la réponse de l'IA simulant le référentiel ROME\nconst simulation = $input.first().json;\n\n// Extraction du JSON généré par l'IA\nconst simulationText = simulation.output[0].content[0].text;\nconst romeData = JSON.parse(simulationText);\n\n// Vérification de la réponse du référentiel\nif (romeData.warning && !romeData.expectedSkills?.length) {\n  throw new Error(`Simulation ROME : ${romeData.warning}`);\n}\n\nif (!Array.isArray(romeData.expectedSkills) || romeData.expectedSkills.length === 0) {\n  throw new Error(\"Aucune compétence attendue n'a été retournée.\");\n}\n\n// Récupération du profil candidat\nconst profile = webhook.body.profile;\n\n// Préparation des données pour l'analyse des compétences\nreturn [\n  {\n    json: {\n      candidate: {\n        technicalSkills: profile.technicalSkills || [],\n        softSkills: profile.softSkills || [],\n        transferableSkills: profile.transferableSkills || []\n      },\n      targetJob: {\n        name: romeData.targetJob.name,\n        romeCode: romeData.targetJob.romeCode,\n        region: profile.region\n      },\n      expectedSkills: romeData.expectedSkills\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -80,
+        176
+      ],
+      "id": "e3956f87-c400-4483-b3aa-454e39eaab2a",
+      "name": "Préparation données IA"
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\n\nconst text = response.output[0].content[0].text;\n\nconst result = JSON.parse(text);\n\n// Récupération des données préparées précédemment\nconst prepared = $('Préparation données IA').first().json;\n\nreturn [\n  {\n    json: {\n      ...result,\n      targetJob: prepared.targetJob,\n      region: prepared.targetJob.region\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        624,
+        176
+      ],
+      "id": "3a7d17be-63bb-4cf2-beac-7c90825d86d2",
+      "name": "Extraction résultat IA"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-6-luna",
+          "mode": "list",
+          "cachedResultName": "GPT-6-LUNA"
+        },
+        "responses": {
+          "values": [
+            {
+              "role": "system",
+              "content": "Tu es un expert en référentiel des métiers et compétences professionnelles.\n\nTu simules le fonctionnement du référentiel ROME de France Travail.\n\nÀ partir du métier et du code ROME transmis, identifie les compétences professionnelles techniques nécessaires pour exercer ce métier.\n\nRÈGLES :\n\n1. Identifie entre 5 et 10 compétences techniques essentielles au métier.\n2. Les compétences doivent être concrètes, précises et professionnelles.\n3. Privilégie les compétences opérationnelles pouvant être acquises ou développées dans le cadre d'une formation professionnelle.\n4. Formule chaque compétence comme un savoir-faire observable.\n5. Évite les qualités personnelles, les soft skills et les compétences trop générales.\n6. Ne reprends pas les compétences du candidat : tu dois uniquement décrire les compétences attendues pour le métier.\n7. Adapte intégralement les compétences au métier transmis.\n8. Ne retourne pas de compétences génériques qui pourraient convenir à n'importe quel métier.\n9. Si le code ROME ne correspond pas au métier indiqué ou si tu ne peux pas identifier le métier avec suffisamment de certitude, signale-le dans le champ warning.\n\nFORMAT DE SORTIE :\n\nRetourne exclusivement un JSON valide, sans Markdown ni commentaire.\n\nRespecte exactement cette structure :\n\n{\n  \"targetJob\": {\n    \"name\": \"\",\n    \"romeCode\": \"\"\n  },\n  \"expectedSkills\": [],\n  \"warning\": \"\"\n}"
+            },
+            {
+              "content": "={{ $json.body.toJsonString() }}"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.3,
+      "position": [
+        -336,
+        -48
+      ],
+      "id": "e2635e61-b1c2-476a-a86d-1af3abcc7e14",
+      "name": "Simulation référentiel ROME",
+      "credentials": {
+        "openAiApi": {
+          "id": "N1Rx437bdRXtuP70",
+          "name": "OpenAI account 9"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "virage/roadmap",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.2,
+      "position": [
+        -560,
+        -48
+      ],
+      "id": "78476f9d-2db2-46f5-b75e-aaf3a4521032",
+      "name": "roadmap",
+      "webhookId": "becd1020-c90a-4c07-81ea-8fcc7ec3a530"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-6-luna",
+          "mode": "list",
+          "cachedResultName": "GPT-6-LUNA"
+        },
+        "responses": {
+          "values": [
+            {
+              "role": "system",
+              "content": "Tu es un assistant spécialisé dans l'orientation professionnelle et la recherche de formations.\n\nTu simules le fonctionnement du catalogue de formations de France Travail.\n\nÀ partir du métier, de la région et des compétences manquantes du candidat, propose des formations professionnelles adaptées.\n\nRÈGLES :\n\n1. Propose au maximum une formation par compétence manquante.\n2. Chaque formation doit permettre d'acquérir une ou plusieurs compétences manquantes.\n3. Une formation peut couvrir plusieurs compétences si elles sont liées.\n4. Privilégie les formations professionnelles qualifiantes ou certifiantes.\n5. Les intitulés doivent être réalistes et correspondre à de véritables types de formations professionnelles.\n6. Les organismes peuvent être fictifs.\n7. Les durées doivent être estimées et cohérentes avec le contenu.\n8. Propose une ville située dans la région du candidat.\n9. Utilise les grandes villes de la région si nécessaire.\n10. Ne laisse jamais une localisation vide ou indéterminée.\n11. Ne prétends pas que les formations générées sont réellement disponibles ou référencées par France Travail.\n12. Ne crée pas de compétences supplémentaires.\n\nPour chaque formation, retourne :\n- title : intitulé de la formation\n- organization : organisme de formation\n- location : ville\n- duration : durée estimée\n- modality : présentiel, distanciel ou hybride\n- certification : certification ou qualification préparée\n- relatedSkills : tableau des compétences manquantes couvertes\n\nFORMAT :\n\nRetourne exclusivement un JSON valide, sans Markdown ni commentaire.\n\n{\n  \"formations\": [\n    {\n      \"title\": \"\",\n      \"organization\": \"\",\n      \"location\": \"\",\n      \"duration\": \"\",\n      \"modality\": \"\",\n      \"certification\": \"\",\n      \"relatedSkills\": []\n    }\n  ]\n}\n\nSi une compétence ne peut pas être associée à une formation précise, propose une formation professionnelle plus générale dans le domaine concerné.\n\nIMPORTANT — LOCALISATION :\n\nLa région transmise dans les données du candidat est une contrainte obligatoire.\n\nToutes les formations proposées doivent être localisées dans cette région.\n\nNe propose jamais une ville située dans une autre région.\n\nExemples :\n- Nouvelle-Aquitaine : Bordeaux, Limoges, Poitiers, Pau, La Rochelle.\n- Île-de-France : Paris, Nanterre, Versailles, Évry.\n- Occitanie : Toulouse, Montpellier, Nîmes, Perpignan.\n\nSi tu ne connais pas précisément une ville de la région, utilise une grande ville régionale plutôt que d'inventer une localisation."
+            },
+            {
+              "content": "={{ $json.toJsonString() }}"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.3,
+      "position": [
+        848,
+        176
+      ],
+      "id": "37157bcd-7808-478b-9d74-50d2e10abfa2",
+      "name": "Simulation catalogue formations",
+      "credentials": {
+        "openAiApi": {
+          "id": "N1Rx437bdRXtuP70",
+          "name": "OpenAI account 9"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\n\nconst text = response.output[0].content[0].text;\n\nconst result = JSON.parse(text);\n\nreturn [\n  {\n    json: result\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1216,
+        176
+      ],
+      "id": "0159f03d-c08c-44e1-b7e3-e49538ab8b8c",
+      "name": "Extraction formations"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-6-luna",
+          "mode": "list",
+          "cachedResultName": "GPT-6-LUNA"
+        },
+        "responses": {
+          "values": [
+            {
+              "role": "system",
+              "content": "Tu es un expert en ingénierie de formation et en accompagnement des reconversions professionnelles.\n\nTa mission est de construire un parcours de reconversion progressif et réaliste pour un candidat, à partir de son profil, de ses compétences manquantes et des formations recommandées.\n\nRÈGLES :\n\n1. Construis un parcours personnalisé en plusieurs étapes mensuelles.\n2. Organise les objectifs dans un ordre pédagogique cohérent : découverte, apprentissage des bases, acquisition des compétences techniques, mise en pratique, professionnalisation.\n3. Adapte la durée du parcours à la complexité du métier et aux formations recommandées.\n4. Chaque étape doit contenir des objectifs concrets et réalisables.\n5. Les objectifs doivent correspondre aux compétences manquantes du candidat.\n6. Prends en compte les formations recommandées pour structurer le parcours.\n7. Ne considère jamais une compétence manquante comme déjà acquise.\n8. Le numéro du mois doit être un entier positif.\n9. Ne crée pas de formation supplémentaire.\n10. Le parcours doit être cohérent avec le métier cible et la région du candidat.\n\nFORMAT DE SORTIE :\n\nRetourne exclusivement un JSON valide, sans Markdown ni commentaire.\n\nRespecte exactement cette structure :\n\n{\n  \"estimatedDuration\": \"\",\n  \"roadmap\": [\n    {\n      \"month\": 1,\n      \"objectives\": []\n    }\n  ]\n}"
+            },
+            {
+              "content": "={{ JSON.stringify({\n  targetJob: $('Préparation données IA').first().json.targetJob,\n  candidate: $('Préparation données IA').first().json.candidate,\n  missingSkills: $('Extraction résultat IA').first().json.missingSkills,\n  trainings: $('Extraction formations').first().json.formations\n}) }}"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.3,
+      "position": [
+        1440,
+        176
+      ],
+      "id": "8990f78f-c5c5-46fc-b6fd-5016988c8ad4",
+      "name": "Génération roadmap",
+      "credentials": {
+        "openAiApi": {
+          "id": "N1Rx437bdRXtuP70",
+          "name": "OpenAI account 9"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. Récupération des résultats précédents\nconst prepared = $('Préparation données IA').first().json;\nconst analysis = $('Extraction résultat IA').first().json;\nconst formations = $('Extraction formations').first().json.formations;\nconst roadmapResponse = $input.first().json;\n\n// 2. Extraction de la réponse de génération de la roadmap\nconst roadmapText = roadmapResponse.output[0].content[0].text;\nconst roadmapData = JSON.parse(roadmapText);\n\n// 3. Transformation des formations au format attendu par le backend\nconst trainings = formations.map(training => ({\n  title: training.title,\n  organization: training.organization,\n  duration: training.duration,\n  level: training.certification || training.level || \"Non précisé\",\n  url: training.url || \"\"\n}));\n\n// 4. Calcul du taux de compatibilité\nconst totalSkills =\n  analysis.acquiredSkills.length + analysis.missingSkills.length;\n\nconst compatibility = totalSkills > 0\n  ? Math.round((analysis.acquiredSkills.length / totalSkills) * 100)\n  : 0;\n\n// 5. Construction de la réponse finale\nreturn [\n  {\n    json: {\n      compatibility,\n      existingSkills: analysis.acquiredSkills,\n      missingSkills: analysis.missingSkills,\n      estimatedDuration: roadmapData.estimatedDuration,\n      roadmap: roadmapData.roadmap,\n      trainings\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1808,
+        176
+      ],
+      "id": "3753b848-d05f-48c0-a4c3-84cfef9fb7d1",
+      "name": "Assemblage réponse finale"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        2032,
+        176
+      ],
+      "id": "59696ff3-fb97-43bd-8030-7e5355fb591c",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        848,
+        -96
+      ],
+      "id": "9c118c80-e427-4bdb-9f9d-30a1ce624782",
+      "name": "HTTP Request",
+      "disabled": true
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "IA - Analyses des compétences": {
+      "main": [
+        [
+          {
+            "node": "Extraction résultat IA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Préparation données IA": {
+      "main": [
+        [
+          {
+            "node": "Récupérer compétences métier",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "IA - Analyses des compétences",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simulation référentiel ROME": {
+      "main": [
+        [
+          {
+            "node": "Préparation données IA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "roadmap": {
+      "main": [
+        [
+          {
+            "node": "Simulation référentiel ROME",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extraction résultat IA": {
+      "main": [
+        [
+          {
+            "node": "Simulation catalogue formations",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simulation catalogue formations": {
+      "main": [
+        [
+          {
+            "node": "Extraction formations",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extraction formations": {
+      "main": [
+        [
+          {
+            "node": "Génération roadmap",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Génération roadmap": {
+      "main": [
+        [
+          {
+            "node": "Assemblage réponse finale",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assemblage réponse finale": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "74e48469-ea37-469e-ba1e-58f0a4a2f6ef",
+  "meta": {
+    "instanceId": "2e00a4319cadc549cfb110a203e802bab35785876ab781b49ee4983d1dde83c9"
+  },
+  "nodeGroups": [],
+  "id": "A2TjIFj1AmhSMdUd",
+  "tags": []
+}

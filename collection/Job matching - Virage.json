@@ -1,0 +1,159 @@
+{
+  "name": "Job matching - Virage",
+  "nodes": [
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-6.1-terra",
+          "mode": "list",
+          "cachedResultName": "GPT-6.1-TERRA"
+        },
+        "responses": {
+          "values": [
+            {
+              "role": "system",
+              "content": "=Tu es un conseiller en évolution professionnelle spécialisé dans les reconversions de carrière. Analyse le profil reçu et propose exactement 10 métiers pertinents : 2 proches du métier actuel, 3 évolutions naturelles et 5 reconversions réalistes. Valorise les compétences transférables, les responsabilités et les soft skills. Évite les doublons et utilise des intitulés de métiers connus sur le marché français.\n\nRetourne uniquement un JSON valide, sans bloc Markdown, avec exactement cette structure :\n{\n  \"jobs\": [\n    {\n      \"name\": \"Intitulé du métier\",\n      \"score\": 89,\n      \"description\": \"Description courte du métier\",\n      \"reason\": \"Pourquoi ce métier correspond au profil\"\n    }\n  ]\n}\n\nContraintes : jobs contient exactement 10 objets ; score est un entier entre 0 et 100 ; name, description et reason sont des chaînes non vides. N'ajoute aucun autre champ.\n\nProfil reçu : {{ $json.body.toJsonString() }}"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.3,
+      "position": [
+        2368,
+        1136
+      ],
+      "id": "b6b1f942-76f9-4ada-8da6-a3961d6e7e38",
+      "name": "Analyser et suggérer les métiers",
+      "credentials": {
+        "openAiApi": {
+          "id": "N1Rx437bdRXtuP70",
+          "name": "OpenAI account 9"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const result = $input.first().json;\n\nconst message = Array.isArray(result.output)\n  ? result.output.find((entry) => entry.type === \"message\")\n  : undefined;\n\nlet text =\n  message?.content?.find((entry) => entry.type === \"output_text\")?.text\n  ?? result.output_text\n  ?? result.text;\n\nif (typeof text !== \"string\" || !text.trim()) {\n  throw new Error(\"Le modèle n'a pas renvoyé de JSON.\");\n}\n\ntext = text.trim().replace(/^```(?:json)?\\s*|\\s*```$/g, \"\");\n\nlet parsed;\ntry {\n  parsed = JSON.parse(text);\n} catch {\n  throw new Error(\"La réponse du modèle n'est pas un JSON valide.\");\n}\n\nconst suggestions = Array.isArray(parsed) ? parsed : parsed.jobs;\nif (!Array.isArray(suggestions)) {\n  throw new Error(\"La réponse du modèle doit contenir un tableau « jobs ».\");\n}\n\nconst jobs = suggestions.map((job, index) => {\n  const name = job.name ?? job.jobTitle ?? job.libelleRome ?? job.intitule;\n  const rawScore = Number(job.score ?? job.compatibilityScore ?? job.scorePrediction);\n  const score = Math.round(rawScore <= 1 ? rawScore * 100 : rawScore);\n  const skills = Array.isArray(job.matchingSkills) ? job.matchingSkills.join(\", \") : \"\";\n  const description = job.description ?? skills;\n  const reason = job.reason ?? job.contexte;\n\n  if (\n    typeof name !== \"string\" || !name.trim()\n    || !Number.isFinite(score) || score < 0 || score > 100\n    || typeof description !== \"string\" || !description.trim()\n    || typeof reason !== \"string\" || !reason.trim()\n  ) {\n    throw new Error(`Le métier numéro ${index + 1} ne contient pas les champs requis.`);\n  }\n\n  return {\n    name: name.trim(),\n    score,\n    description: description.trim(),\n    reason: reason.trim()\n  };\n});\n\nreturn [{ json: { jobs } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2752,
+        1136
+      ],
+      "id": "7c2b576c-8f28-4bba-b9d8-05d07d75980f",
+      "name": "Valider le format de réponse"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.francetravail.io/partenaire/romeo/v2/predictionMetiers",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        2752,
+        1424
+      ],
+      "id": "eb3e02e7-e5ef-4c30-b47a-fa07c501a125",
+      "name": "HTTP Request France Travail (désactivé)",
+      "credentials": {
+        "oAuth2Api": {
+          "id": "FBA90336uRSQ3RAC",
+          "name": "Unnamed credential 3"
+        }
+      },
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "virage/job-matching",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.2,
+      "position": [
+        2144,
+        1136
+      ],
+      "id": "78657250-7dcb-461d-a084-05a82ff24cd8",
+      "name": "Webhook",
+      "webhookId": "dd570c80-4b5d-4b67-a55d-f4d01955863a"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        3040,
+        1136
+      ],
+      "id": "f07521d9-3d30-42a7-b8a5-02d607c6e6de",
+      "name": "Respond to Webhook"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Analyser et suggérer les métiers": {
+      "main": [
+        [
+          {
+            "node": "Valider le format de réponse",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valider le format de réponse": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Analyser et suggérer les métiers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "0fdc659f-0f9a-4fca-851a-e5e4b30a7d9a",
+  "meta": {
+    "instanceId": "2e00a4319cadc549cfb110a203e802bab35785876ab781b49ee4983d1dde83c9"
+  },
+  "nodeGroups": [],
+  "id": "RppxJvvFpHBSGaRF",
+  "tags": []
+}
