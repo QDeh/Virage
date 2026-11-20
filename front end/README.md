@@ -42,5 +42,6 @@ Les tests navigateur simulent les réponses des endpoints, mais vérifient que l
 - L’envoi facultatif du CV en PDF/DOCX (10 Mo maximum) et des préférences en multipart déclenche l’analyse du profil. Sans CV, l’analyse utilise les informations de profil saisies.
 - Les compétences obtenues alimentent la recherche des métiers compatibles.
 - Le choix d’un métier déclenche l’analyse de compatibilité, le parcours et les formations.
+- Les roadmaps sont conservées dans le profil Supabase, par métier, puis réutilisées lors d’une nouvelle sélection du même métier.
 
 Le profil, les réponses de l’application et le CV sont conservés dans le compte Supabase et synchronisés entre appareils. Le CV est facultatif et peut être supprimé depuis l’étape du profil. « Recommencer » efface le parcours et le CV enregistré.

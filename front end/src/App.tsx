@@ -166,6 +166,14 @@ export default function App() {
         const profile = saved?.app_state
           ? { ...initial, ...saved.app_state }
           : { ...initial };
+        profile.jobAnalyses = { ...(profile.jobAnalyses ?? {}) };
+        if (
+          profile.jobAnalysis &&
+          profile.selected &&
+          !Object.hasOwn(profile.jobAnalyses, profile.selected)
+        ) {
+          profile.jobAnalyses[profile.selected] = profile.jobAnalysis;
+        }
         if (profile.view === "loading") profile.view = "wizard";
         if (saved?.cv_path) {
           const blob = await downloadCv(saved.cv_path);
@@ -251,7 +259,13 @@ export default function App() {
     update({ step, view: "wizard", maxStep: Math.max(state.maxStep, step) });
   const startAnalysis = async () => {
     setApiError("");
-    update({ view: "loading", profileAnalysis: null, jobs: [], jobAnalysis: null });
+    update({
+      view: "loading",
+      profileAnalysis: null,
+      jobs: [],
+      jobAnalysis: null,
+      jobAnalyses: {},
+    });
     try {
       const profile = await analyzeProfile(cvFile, {
         currentJob: state.job,
@@ -291,13 +305,28 @@ export default function App() {
       setApiError("Relancez l’analyse de votre profil avant de choisir un métier.");
       return;
     }
+    if (jobLoading) return;
     setApiError("");
+    const cachedAnalysis = Object.hasOwn(state.jobAnalyses, name)
+      ? state.jobAnalyses[name]
+      : null;
+    if (cachedAnalysis) {
+      update({
+        selected: name,
+        jobAnalysis: cachedAnalysis,
+        step: 4,
+        maxStep: Math.max(state.maxStep, 4),
+        view: "wizard",
+      });
+      return;
+    }
     setJobLoading(true);
     update({ selected: name, jobAnalysis: null });
     try {
       const analysis = await analyzeJob(name, state.profileAnalysis);
       update({
         jobAnalysis: analysis,
+        jobAnalyses: { ...state.jobAnalyses, [name]: analysis },
         step: 4,
         maxStep: Math.max(state.maxStep, 4),
         view: "wizard",
@@ -407,7 +436,11 @@ export default function App() {
                 {steps.map((step, i) => (
                   <button
                     key={step}
-                    disabled={i > state.maxStep || state.view === "loading"}
+                    disabled={
+                      i > state.maxStep ||
+                      state.view === "loading" ||
+                      jobLoading
+                    }
                     className={`step ${i === state.step && state.view !== "dashboard" ? "current" : ""} ${i < state.step || state.view === "dashboard" ? "completed" : ""}`}
                     onClick={() => go(i)}
                     aria-current={i === state.step ? "step" : undefined}
@@ -429,7 +462,7 @@ export default function App() {
           <main
             ref={focusRef}
             tabIndex={-1}
-            className={`main-content ${state.view === "loading" ? "loading-main" : ""}`}
+            className={`main-content ${state.view === "loading" || jobLoading ? "loading-main" : ""}`}
           >
             {apiError && (
               <p className="error" role="alert">
@@ -441,7 +474,9 @@ export default function App() {
                 Vos modifications ne sont pas synchronisées : {syncError}
               </p>
             )}
-            {state.view === "loading" ? (
+            {jobLoading ? (
+              <RoadmapLoading jobName={state.selected} />
+            ) : state.view === "loading" ? (
               <AnalysisLoading />
             ) : state.view === "dashboard" ? (
               state.jobAnalysis ? (
@@ -457,7 +492,12 @@ export default function App() {
                 </p>
               )
             ) : (
-              <div key={state.step} className="step-content enter">
+              <div
+                key={state.step}
+                className={`step-content enter ${
+                  state.step === 5 ? "roadmap-page" : ""
+                }`}
+              >
                 {state.step === 0 && <ProfileStep />}
                 {state.step === 1 && (
                   <>
@@ -1599,12 +1639,12 @@ function AnalysisLoading() {
   const [progress, setProgress] = useState(0);
   useEffect(() => {
     const timer = window.setInterval(
-      () => setProgress((p) => Math.min(90, p + 1)),
-      120,
+      () => setProgress((p) => Math.min(95, p + (95 - p) * 0.025)),
+      500,
     );
     return () => clearInterval(timer);
   }, []);
-  const index = Math.min(7, Math.floor(progress / 12.6));
+  const index = Math.min(7, Math.floor(progress / 12));
   return (
     <Card className="loading-card">
       <div className="loading-orbit">
@@ -1618,7 +1658,7 @@ function AnalysisLoading() {
       <p>Nous préparons vos recommandations personnalisées.</p>
       <div className="loading-status" role="status" aria-live="polite">
         <span>{loadingMessages[index]}</span>
-        <strong>{progress}%</strong>
+        <strong>{Math.round(progress)}%</strong>
       </div>
       <Progress value={progress} label="Progression de l’analyse" />
       <div className="loading-checks">
@@ -1638,9 +1678,117 @@ function AnalysisLoading() {
     </Card>
   );
 }
-function CourseCard({ course }: { course: Training }) {
+function RoadmapLoading({ jobName }: { jobName: string }) {
+  const [progress, setProgress] = useState(8);
+  useEffect(() => {
+    const timer = window.setInterval(
+      () =>
+        setProgress((value) =>
+          Math.min(92, value + Math.max(0.7, (92 - value) * 0.035)),
+        ),
+      500,
+    );
+    return () => window.clearInterval(timer);
+  }, []);
+  const phases = [
+    "Analyse du métier et de ses besoins",
+    "Repérage des compétences à acquérir",
+    "Organisation des étapes de progression",
+    "Préparation de votre feuille de route",
+  ];
+  const activePhase = Math.min(phases.length - 1, Math.floor(progress / 24));
   return (
-    <Card className="course-card">
+    <Card className="roadmap-loading-card">
+      <div className="roadmap-loading-heading">
+        <span className="roadmap-loading-mark">
+          <Route size={21} aria-hidden="true" />
+        </span>
+        <div>
+          <Badge>VOTRE FEUILLE DE ROUTE</Badge>
+          <h1>Votre parcours prend forme</h1>
+          <p>
+            Nous préparons les étapes clés pour vous guider vers{" "}
+            <strong>{jobName}</strong>.
+          </p>
+        </div>
+      </div>
+      <div className="roadmap-loading-progress">
+        <div className="roadmap-loading-progress-label">
+          <span>Génération du parcours</span>
+          <strong>{Math.round(progress)}%</strong>
+        </div>
+        <Progress
+          value={progress}
+          label="Progression de la génération du parcours"
+        />
+      </div>
+      <ol className="roadmap-loading-steps">
+        {phases.map((phase, index) => (
+          <li
+            className={
+              index < activePhase
+                ? "complete"
+                : index === activePhase
+                  ? "active"
+                  : ""
+            }
+            key={phase}
+          >
+            <span className="roadmap-loading-node">
+              {index < activePhase ? <Check size={13} /> : index + 1}
+            </span>
+            <span>{phase}</span>
+            {index === activePhase && (
+              <span className="roadmap-loading-dots" aria-hidden="true">
+                <i />
+                <i />
+                <i />
+              </span>
+            )}
+          </li>
+        ))}
+      </ol>
+      <div className="roadmap-loading-status" role="status" aria-live="polite">
+        Étape {activePhase + 1} sur {phases.length} · Votre parcours se
+        construit
+      </div>
+    </Card>
+  );
+}
+function CourseCard({ course }: { course: Training }) {
+  const providedUrl = course.url?.trim();
+  const candidateUrl = providedUrl
+    ? /^[a-z][a-z\d+.-]*:/i.test(providedUrl)
+      ? providedUrl
+      : `https://${providedUrl}`
+    : "";
+  let destination = "";
+  try {
+    const parsedUrl = new URL(candidateUrl);
+    if (parsedUrl.protocol === "http:" || parsedUrl.protocol === "https:") {
+      destination = parsedUrl.href;
+    }
+  } catch {
+    // Ignore malformed workflow URLs and use a known provider homepage if available.
+  }
+  const providerName = course.organization
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase("fr");
+  const knownProviders: [string, string][] = [
+    ["afpa", "https://www.afpa.fr/"],
+    ["openclassrooms", "https://openclassrooms.com/"],
+    ["cnam", "https://www.cnam.fr/"],
+  ];
+  const knownProvider = knownProviders.find(([name]) =>
+    providerName.includes(name),
+  );
+  if (!destination) {
+    destination = knownProvider?.[1] ?? "";
+  }
+
+  const content = (
+    <>
       <div className="course-provider">
         <span className="provider-logo purple">
           {course.organization.slice(0, 3).toUpperCase()}
@@ -1659,15 +1807,28 @@ function CourseCard({ course }: { course: Training }) {
           {course.level}
         </span>
       </div>
-      {course.url && (
-        <Button asChild variant="outline">
-          <a href={course.url} target="_blank" rel="noreferrer">
-            Consulter
-            <ExternalLink size={15} />
-          </a>
-        </Button>
-      )}
-    </Card>
+    </>
+  );
+  if (!destination) {
+    return (
+      <Card className="course-card">
+        {content}
+        <span className="course-link-unavailable">
+          Lien direct vers le centre indisponible
+        </span>
+      </Card>
+    );
+  }
+  return (
+    <a
+      className="card course-card course-card-link"
+      href={destination}
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label={`Ouvrir le site de ${course.organization} pour la formation ${course.title}`}
+    >
+      {content}
+    </a>
   );
 }
 

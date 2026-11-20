@@ -120,6 +120,7 @@ async function mockBackend(page: import("@playwright/test").Page) {
   });
   await page.route("**/api/jobs/*/analysis", async (route) => {
     calls.push(new URL(route.request().url()).pathname);
+    await new Promise((resolve) => setTimeout(resolve, 250));
     await route.fulfill({
       contentType: "application/json",
       body: JSON.stringify({
@@ -151,7 +152,6 @@ async function mockBackend(page: import("@playwright/test").Page) {
             organization: "CNAM",
             duration: "12 mois",
             level: "Intermédiaire",
-            url: "https://example.com/cnam",
           },
         ],
       }),
@@ -198,9 +198,13 @@ test("parcours complet, sauvegarde, PDF et nouveau projet", async ({
   const savedAfterPreferenceChange = page.waitForResponse(
     (response) =>
       response.url().includes("/rest/v1/virage_profiles") &&
-      response.request().method() === "POST",
+      response.request().method() === "POST" &&
+      response.request().postData()?.includes('"management":true'),
   );
   await page.getByRole("switch", { name: "Management d’équipe" }).click();
+  await expect(
+    page.getByRole("switch", { name: "Management d’équipe" }),
+  ).toBeChecked();
   await savedAfterPreferenceChange;
   await page.reload();
   await expect(
@@ -225,6 +229,44 @@ test("parcours complet, sauvegarde, PDF et nouveau projet", async ({
     .first()
     .click();
   await expect(
+    page.getByRole("heading", { name: "Votre parcours prend forme" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("progressbar", {
+      name: "Progression de la génération du parcours",
+    }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Analyse du métier et de ses besoins"),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Analyse de compatibilité" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: /Résultats/ }).click();
+  const savedRoadmapCache = page.waitForResponse(
+    (response) =>
+      response.url().includes("/rest/v1/virage_profiles") &&
+      response.request().method() === "POST",
+  );
+  await page
+    .getByRole("button", { name: "Voir le parcours", exact: true })
+    .first()
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Analyse de compatibilité" }),
+  ).toBeVisible();
+  await savedRoadmapCache;
+  await expect(page.getByText("Progression sauvegardée")).toBeVisible();
+  await page.reload();
+  await expect(
+    page.getByRole("heading", { name: "Analyse de compatibilité" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: /Résultats/ }).click();
+  await page
+    .getByRole("button", { name: "Voir le parcours", exact: true })
+    .first()
+    .click();
+  await expect(
     page.getByRole("heading", { name: "Analyse de compatibilité" }),
   ).toBeVisible();
   await page
@@ -233,8 +275,29 @@ test("parcours complet, sauvegarde, PDF et nouveau projet", async ({
   await expect(
     page.getByRole("heading", { name: "Votre feuille de route" }),
   ).toBeVisible();
+  await expect(page.getByText("MOIS 1")).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Bases réseaux" }),
+  ).toBeVisible();
   await page.getByRole("button", { name: "Trouver une formation" }).click();
-  await expect(page.getByRole("link", { name: "Consulter" })).toHaveCount(3);
+  const courseLinks = page.locator(".course-card-link");
+  await expect(courseLinks).toHaveCount(3);
+  await expect(courseLinks.first()).toHaveAttribute(
+    "href",
+    "https://example.com/afpa",
+  );
+  await expect(courseLinks.first()).toHaveAttribute("target", "_blank");
+  await expect(courseLinks.nth(2)).toHaveAttribute(
+    "href",
+    "https://www.cnam.fr/",
+  );
+  await expect(page.locator(".course-card-link .btn")).toHaveCount(0);
+  await expect(courseLinks.first()).toHaveCSS("display", "flex");
+  const providerPagePromise = page.waitForEvent("popup");
+  await courseLinks.first().click();
+  const providerPage = await providerPagePromise;
+  await expect(providerPage).toHaveURL("https://example.com/afpa");
+  await providerPage.close();
   expect(apiCalls).toEqual([
     "/api/profile/analyze",
     "/api/jobs/match",

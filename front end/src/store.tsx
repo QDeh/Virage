@@ -30,6 +30,7 @@ export type Profile = {
   profileAnalysis: ProfileAnalysisResponse | null;
   jobs: JobSuggestion[];
   jobAnalysis: JobAnalysisResponse | null;
+  jobAnalyses: Record<string, JobAnalysisResponse>;
   step: number;
   maxStep: number;
   view: "home" | "wizard" | "loading" | "dashboard";
@@ -53,6 +54,7 @@ export const initial: Profile = {
   profileAnalysis: null,
   jobs: [],
   jobAnalysis: null,
+  jobAnalyses: {},
   step: 0,
   maxStep: 0,
   view: "home",
